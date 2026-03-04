@@ -1,0 +1,12 @@
+D:\HK2\NT132\NT106_DrawingApp\DrawingServer\bin\Debug\DrawingServer.exe.config
+D:\HK2\NT132\NT106_DrawingApp\DrawingServer\bin\Debug\DrawingServer.exe
+D:\HK2\NT132\NT106_DrawingApp\DrawingServer\bin\Debug\DrawingServer.pdb
+D:\HK2\NT132\NT106_DrawingApp\DrawingServer\bin\Debug\Newtonsoft.Json.dll
+D:\HK2\NT132\NT106_DrawingApp\DrawingServer\bin\Debug\SharedLib.dll
+D:\HK2\NT132\NT106_DrawingApp\DrawingServer\bin\Debug\SharedLib.pdb
+D:\HK2\NT132\NT106_DrawingApp\DrawingServer\bin\Debug\Newtonsoft.Json.xml
+D:\HK2\NT132\NT106_DrawingApp\DrawingServer\obj\Debug\DrawingServer.csproj.AssemblyReference.cache
+D:\HK2\NT132\NT106_DrawingApp\DrawingServer\obj\Debug\DrawingServer.csproj.CoreCompileInputs.cache
+D:\HK2\NT132\NT106_DrawingApp\DrawingServer\obj\Debug\DrawingS.E35FEC39.Up2Date
+D:\HK2\NT132\NT106_DrawingApp\DrawingServer\obj\Debug\DrawingServer.exe
+D:\HK2\NT132\NT106_DrawingApp\DrawingServer\obj\Debug\DrawingServer.pdb

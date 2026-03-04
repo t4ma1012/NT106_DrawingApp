@@ -1,0 +1,206 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "D:\\HK2\\NT132\\NT106_DrawingApp\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{18FBF7D8-2219-4F47-8826-6246E3F22FC4}|DrawingServer\\DrawingServer.csproj|d:\\hk2\\nt132\\nt106_drawingapp\\drawingserver\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{18FBF7D8-2219-4F47-8826-6246E3F22FC4}|DrawingServer\\DrawingServer.csproj|solutionrelative:drawingserver\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|d:\\hk2\\nt132\\nt106_drawingapp\\sharedlib\\packets\\packethelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|solutionrelative:sharedlib\\packets\\packethelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|d:\\hk2\\nt132\\nt106_drawingapp\\sharedlib\\packets\\packetdef.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|solutionrelative:sharedlib\\packets\\packetdef.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|d:\\hk2\\nt132\\nt106_drawingapp\\sharedlib\\payloads\\claimpayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|solutionrelative:sharedlib\\payloads\\claimpayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|d:\\hk2\\nt132\\nt106_drawingapp\\sharedlib\\payloads\\interactionpayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|solutionrelative:sharedlib\\payloads\\interactionpayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|d:\\hk2\\nt132\\nt106_drawingapp\\sharedlib\\payloads\\roompayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|solutionrelative:sharedlib\\payloads\\roompayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|d:\\hk2\\nt132\\nt106_drawingapp\\sharedlib\\payloads\\authpayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|solutionrelative:sharedlib\\payloads\\authpayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|d:\\hk2\\nt132\\nt106_drawingapp\\sharedlib\\payloads\\drawpayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|solutionrelative:sharedlib\\payloads\\drawpayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|d:\\hk2\\nt132\\nt106_drawingapp\\sharedlib\\class1.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|solutionrelative:sharedlib\\class1.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{31A18805-599B-462E-85FF-8EB784FA6E79}|LoadBalancer\\LoadBalancer.csproj|d:\\hk2\\nt132\\nt106_drawingapp\\loadbalancer\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{31A18805-599B-462E-85FF-8EB784FA6E79}|LoadBalancer\\LoadBalancer.csproj|solutionrelative:loadbalancer\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|d:\\hk2\\nt132\\nt106_drawingapp\\drawingclient\\form1.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form",
+      "RelativeMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|solutionrelative:drawingclient\\form1.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 5,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "PacketHelper.cs",
+              "DocumentMoniker": "D:\\HK2\\NT132\\NT106_DrawingApp\\SharedLib\\Packets\\PacketHelper.cs",
+              "RelativeDocumentMoniker": "SharedLib\\Packets\\PacketHelper.cs",
+              "ToolTip": "D:\\HK2\\NT132\\NT106_DrawingApp\\SharedLib\\Packets\\PacketHelper.cs",
+              "RelativeToolTip": "SharedLib\\Packets\\PacketHelper.cs",
+              "ViewState": "AgIAABgAAAAAAAAAAAA0wB4AAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-04T18:01:31.596Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "ClaimPayload.cs",
+              "DocumentMoniker": "D:\\HK2\\NT132\\NT106_DrawingApp\\SharedLib\\Payloads\\ClaimPayload.cs",
+              "RelativeDocumentMoniker": "SharedLib\\Payloads\\ClaimPayload.cs",
+              "ToolTip": "D:\\HK2\\NT132\\NT106_DrawingApp\\SharedLib\\Payloads\\ClaimPayload.cs",
+              "RelativeToolTip": "SharedLib\\Payloads\\ClaimPayload.cs",
+              "ViewState": "AgIAAAsAAAAAAAAAAAA0wBsAAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-04T18:01:07.599Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "InteractionPayload.cs",
+              "DocumentMoniker": "D:\\HK2\\NT132\\NT106_DrawingApp\\SharedLib\\Payloads\\InteractionPayload.cs",
+              "RelativeDocumentMoniker": "SharedLib\\Payloads\\InteractionPayload.cs",
+              "ToolTip": "D:\\HK2\\NT132\\NT106_DrawingApp\\SharedLib\\Payloads\\InteractionPayload.cs",
+              "RelativeToolTip": "SharedLib\\Payloads\\InteractionPayload.cs",
+              "ViewState": "AgIAABoAAAAAAAAAAAAUwCoAAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-04T18:00:50.88Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "RoomPayload.cs",
+              "DocumentMoniker": "D:\\HK2\\NT132\\NT106_DrawingApp\\SharedLib\\Payloads\\RoomPayload.cs",
+              "RelativeDocumentMoniker": "SharedLib\\Payloads\\RoomPayload.cs",
+              "ToolTip": "D:\\HK2\\NT132\\NT106_DrawingApp\\SharedLib\\Payloads\\RoomPayload.cs",
+              "RelativeToolTip": "SharedLib\\Payloads\\RoomPayload.cs",
+              "ViewState": "AgIAAC0AAAAAAAAAAAA0wD0AAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-04T18:00:35.361Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "PacketDef.cs",
+              "DocumentMoniker": "D:\\HK2\\NT132\\NT106_DrawingApp\\SharedLib\\Packets\\PacketDef.cs",
+              "RelativeDocumentMoniker": "SharedLib\\Packets\\PacketDef.cs",
+              "ToolTip": "D:\\HK2\\NT132\\NT106_DrawingApp\\SharedLib\\Packets\\PacketDef.cs",
+              "RelativeToolTip": "SharedLib\\Packets\\PacketDef.cs",
+              "ViewState": "AgIAAHEAAAAAAAAAAAAUwHwAAAArAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-04T17:55:18.417Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "Program.cs",
+              "DocumentMoniker": "D:\\HK2\\NT132\\NT106_DrawingApp\\DrawingServer\\Program.cs",
+              "RelativeDocumentMoniker": "DrawingServer\\Program.cs",
+              "ToolTip": "D:\\HK2\\NT132\\NT106_DrawingApp\\DrawingServer\\Program.cs",
+              "RelativeToolTip": "DrawingServer\\Program.cs",
+              "ViewState": "AgIAACUAAAAAAAAAAAAAADAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-04T17:50:49.968Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 6,
+              "Title": "AuthPayload.cs",
+              "DocumentMoniker": "D:\\HK2\\NT132\\NT106_DrawingApp\\SharedLib\\Payloads\\AuthPayload.cs",
+              "RelativeDocumentMoniker": "SharedLib\\Payloads\\AuthPayload.cs",
+              "ToolTip": "D:\\HK2\\NT132\\NT106_DrawingApp\\SharedLib\\Payloads\\AuthPayload.cs",
+              "RelativeToolTip": "SharedLib\\Payloads\\AuthPayload.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAUwBAAAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-04T18:00:15.415Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 7,
+              "Title": "DrawPayload.cs",
+              "DocumentMoniker": "D:\\HK2\\NT132\\NT106_DrawingApp\\SharedLib\\Payloads\\DrawPayload.cs",
+              "RelativeDocumentMoniker": "SharedLib\\Payloads\\DrawPayload.cs",
+              "ToolTip": "D:\\HK2\\NT132\\NT106_DrawingApp\\SharedLib\\Payloads\\DrawPayload.cs",
+              "RelativeToolTip": "SharedLib\\Payloads\\DrawPayload.cs",
+              "ViewState": "AgIAAAIAAAAAAAAAAAAUwBIAAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-04T17:58:24.866Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 8,
+              "Title": "Class1.cs",
+              "DocumentMoniker": "D:\\HK2\\NT132\\NT106_DrawingApp\\SharedLib\\Class1.cs",
+              "RelativeDocumentMoniker": "SharedLib\\Class1.cs",
+              "ToolTip": "D:\\HK2\\NT132\\NT106_DrawingApp\\SharedLib\\Class1.cs",
+              "RelativeToolTip": "SharedLib\\Class1.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-04T17:49:59.875Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 9,
+              "Title": "Program.cs",
+              "DocumentMoniker": "D:\\HK2\\NT132\\NT106_DrawingApp\\LoadBalancer\\Program.cs",
+              "RelativeDocumentMoniker": "LoadBalancer\\Program.cs",
+              "ToolTip": "D:\\HK2\\NT132\\NT106_DrawingApp\\LoadBalancer\\Program.cs",
+              "RelativeToolTip": "LoadBalancer\\Program.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-04T17:51:45.417Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 10,
+              "Title": "Form1.cs [Design]",
+              "DocumentMoniker": "D:\\HK2\\NT132\\NT106_DrawingApp\\DrawingClient\\Form1.cs",
+              "RelativeDocumentMoniker": "DrawingClient\\Form1.cs",
+              "ToolTip": "D:\\HK2\\NT132\\NT106_DrawingApp\\DrawingClient\\Form1.cs [Design]",
+              "RelativeToolTip": "DrawingClient\\Form1.cs [Design]",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-04T17:51:25.474Z",
+              "EditorCaption": " [Design]"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
