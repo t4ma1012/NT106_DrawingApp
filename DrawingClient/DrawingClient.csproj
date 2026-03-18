@@ -49,11 +49,13 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Form1.cs">
+    <Compile Include="Drawing\CanvasManager.cs" />
+    <Compile Include="Drawing\DrawingTools.cs" />
+    <Compile Include="Forms\LobbyForm.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="Form1.Designer.cs">
-      <DependentUpon>Form1.cs</DependentUpon>
+    <Compile Include="Forms\MainForm.cs">
+      <SubType>Form</SubType>
     </Compile>
     <Compile Include="Network\ClientNetwork.cs" />
     <Compile Include="Program.cs" />
@@ -87,5 +89,6 @@
       <Name>SharedLib</Name>
     </ProjectReference>
   </ItemGroup>
+  <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
