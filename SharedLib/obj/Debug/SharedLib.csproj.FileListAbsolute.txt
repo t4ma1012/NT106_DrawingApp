@@ -1,9 +1,0 @@
-D:\HK2\NT132\NT106_DrawingApp\SharedLib\bin\Debug\SharedLib.dll
-D:\HK2\NT132\NT106_DrawingApp\SharedLib\bin\Debug\SharedLib.pdb
-D:\HK2\NT132\NT106_DrawingApp\SharedLib\bin\Debug\Newtonsoft.Json.dll
-D:\HK2\NT132\NT106_DrawingApp\SharedLib\bin\Debug\Newtonsoft.Json.xml
-D:\HK2\NT132\NT106_DrawingApp\SharedLib\obj\Debug\SharedLib.csproj.AssemblyReference.cache
-D:\HK2\NT132\NT106_DrawingApp\SharedLib\obj\Debug\SharedLib.csproj.CoreCompileInputs.cache
-D:\HK2\NT132\NT106_DrawingApp\SharedLib\obj\Debug\SharedLib.csproj.Up2Date
-D:\HK2\NT132\NT106_DrawingApp\SharedLib\obj\Debug\SharedLib.dll
-D:\HK2\NT132\NT106_DrawingApp\SharedLib\obj\Debug\SharedLib.pdb
