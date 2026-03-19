@@ -429,6 +429,5 @@ FodyWeavers.xsd
 
 obj/
 bin/
-*.cache
 *.user
 .vs/
