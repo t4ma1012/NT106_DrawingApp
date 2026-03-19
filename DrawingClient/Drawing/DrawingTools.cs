@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace DrawingClient.Drawing
+﻿namespace DrawingClient.Drawing
 {
     public enum ToolType
     {
@@ -12,6 +6,9 @@ namespace DrawingClient.Drawing
         Line,
         Rectangle,
         Circle,
-        Eraser
+        Eraser,
+        FloodFill,
+        Text,
+        Pipette
     }
 }

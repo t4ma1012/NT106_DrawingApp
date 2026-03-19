@@ -1,7 +1,8 @@
-﻿using System;
+﻿using DrawingClient.Drawing;
+using DrawingClient.UI;
+using System;
 using System.Drawing;
 using System.Windows.Forms;
-using DrawingClient.Drawing;
 
 namespace DrawingClient.Forms
 {
@@ -10,7 +11,7 @@ namespace DrawingClient.Forms
         private DoubleBufferedPictureBox canvas;
         private Panel toolPanel;
         private Panel userPanel;
-
+        private CursorLayer cursorLayer;
         private Button btnColorPicker;
         private Button btnBackColor;
         private Button btnClearAll;
@@ -24,6 +25,16 @@ namespace DrawingClient.Forms
         {
             InitializeUI();
             canvasManager = new CanvasManager(canvas);
+            canvasManager.OnColorPicked = (color) =>
+            {
+                btnColorPicker.BackColor = color;
+                DrawingClient.UI.ToastForm.ShowToast(this, "Đã hút màu!");
+            };
+
+            canvasManager.OnNetworkDrawAction = (p1, p2, color, width) =>
+            {
+                // NetworkClient.SendDrawUDP(payload); - Sẽ ghép nối sau
+            };
         }
 
         private void InitializeUI()
@@ -120,14 +131,71 @@ namespace DrawingClient.Forms
             this.Controls.Add(canvas);
             this.Controls.Add(userPanel);
             this.Controls.Add(toolPanel);
-        }
-    }
+            this.KeyPreview = true;
+            this.KeyDown += MainForm_KeyDown;
+            this.KeyUp += MainForm_KeyUp;
 
-    public class DoubleBufferedPictureBox : PictureBox
-    {
-        public DoubleBufferedPictureBox()
+            // Thêm các nút công cụ mới vào toolPanel
+            Button btnUndo = new Button { Text = "Hoàn tác", Location = new Point(10, 230), Size = new Size(180, 30) };
+            btnUndo.Click += (s, e) => canvasManager.Undo();
+
+            Button btnZoomIn = new Button { Text = "Zoom +", Location = new Point(10, 270), Size = new Size(85, 30) };
+            btnZoomIn.Click += (s, e) => { canvasManager.ZoomFactor += 0.2f; canvas.Invalidate(); };
+
+            Button btnZoomOut = new Button { Text = "Zoom -", Location = new Point(105, 270), Size = new Size(85, 30) };
+            btnZoomOut.Click += (s, e) => { canvasManager.ZoomFactor = Math.Max(0.2f, canvasManager.ZoomFactor - 0.2f); canvas.Invalidate(); };
+
+            ComboBox cbTools = new ComboBox { Location = new Point(10, 310), Size = new Size(180, 30), DropDownStyle = ComboBoxStyle.DropDownList };
+            cbTools.Items.AddRange(Enum.GetNames(typeof(ToolType)));
+            cbTools.SelectedIndex = 0;
+            cbTools.SelectedIndexChanged += (s, e) => canvasManager.CurrentTool = (ToolType)cbTools.SelectedIndex;
+
+            toolPanel.Controls.AddRange(new Control[] { btnUndo, btnZoomIn, btnZoomOut, cbTools });
+
+            cursorLayer = new DrawingClient.UI.CursorLayer(canvas);
+
+        }
+
+        private void MainForm_KeyDown(object sender, KeyEventArgs e)
         {
-            this.DoubleBuffered = true;
+            if (e.Alt)
+            {
+                // Gửi UDP lệnh CMD_LASER tại đây
+                Point mousePos = canvas.PointToClient(Cursor.Position);
+                cursorLayer.OtherLasers["local"] = mousePos;
+            }
+
+            if (e.KeyCode == Keys.D1) cursorLayer.AddEmoji("👍", canvas.PointToClient(Cursor.Position));
+            if (e.KeyCode == Keys.D2) cursorLayer.AddEmoji("❤️", canvas.PointToClient(Cursor.Position));
+            if (e.KeyCode == Keys.D3) cursorLayer.AddEmoji("😂", canvas.PointToClient(Cursor.Position));
+        }
+
+        private void MainForm_KeyUp(object sender, KeyEventArgs e)
+        {
+            if (!e.Alt && cursorLayer.OtherLasers.ContainsKey("local"))
+            {
+                cursorLayer.OtherLasers.Remove("local");
+                canvas.Invalidate();
+            }
+        }
+
+        // Bắt buộc bọc this.Invoke() khi nhận dữ liệu vẽ từ luồng mạng
+        public void DrawFromNetwork(/* DrawPayload p */)
+        {
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new Action(() => DrawFromNetwork(/* p */)));
+                return;
+            }
+            // Thực thi vẽ dữ liệu nhận được lên canvas
+        }
+
+        public class DoubleBufferedPictureBox : PictureBox
+        {
+            public DoubleBufferedPictureBox()
+            {
+                this.DoubleBuffered = true;
+            }
         }
     }
 }

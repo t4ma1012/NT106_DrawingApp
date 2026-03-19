@@ -51,6 +51,9 @@
   <ItemGroup>
     <Compile Include="Drawing\CanvasManager.cs" />
     <Compile Include="Drawing\DrawingTools.cs" />
+    <Compile Include="Drawing\FloodFill.cs" />
+    <Compile Include="Drawing\TextTool.cs" />
+    <Compile Include="Drawing\UndoStack.cs" />
     <Compile Include="Forms\LobbyForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -60,6 +63,10 @@
     <Compile Include="Network\ClientNetwork.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="UI\CursorLayer.cs" />
+    <Compile Include="UI\ToastForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <EmbeddedResource Include="Properties\Resources.resx">
       <Generator>ResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>

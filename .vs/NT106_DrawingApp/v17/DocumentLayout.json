@@ -3,68 +3,36 @@
   "WorkspaceRootPath": "E:\\NT106_DrawingApp\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|e:\\nt106_drawingapp\\drawingclient\\forms\\lobbyform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|solutionrelative:drawingclient\\forms\\lobbyform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+      "AbsoluteMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|e:\\nt106_drawingapp\\drawingclient\\ui\\toastform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|solutionrelative:drawingclient\\ui\\toastform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|e:\\nt106_drawingapp\\drawingclient\\forms\\mainform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|solutionrelative:drawingclient\\forms\\mainform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+      "AbsoluteMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|e:\\nt106_drawingapp\\drawingclient\\drawing\\floodfill.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|solutionrelative:drawingclient\\drawing\\floodfill.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|e:\\nt106_drawingapp\\drawingclient\\drawing\\canvasmanager.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|solutionrelative:drawingclient\\drawing\\canvasmanager.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
+      "AbsoluteMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|e:\\nt106_drawingapp\\drawingclient\\ui\\cursorlayer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|solutionrelative:drawingclient\\ui\\cursorlayer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|e:\\nt106_drawingapp\\drawingclient\\drawing\\undostack.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|solutionrelative:drawingclient\\drawing\\undostack.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|e:\\nt106_drawingapp\\drawingclient\\forms\\mainform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|solutionrelative:drawingclient\\forms\\mainform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|e:\\nt106_drawingapp\\drawingclient\\drawing\\texttool.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|solutionrelative:drawingclient\\drawing\\texttool.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
       "AbsoluteMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|e:\\nt106_drawingapp\\drawingclient\\drawing\\drawingtools.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|solutionrelative:drawingclient\\drawing\\drawingtools.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|e:\\nt106_drawingapp\\drawingclient\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|solutionrelative:drawingclient\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|E:\\NT106_DrawingApp\\drawingclient\\network\\clientnetwork.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{65855D45-6C8C-472D-8826-285B67ECC743}|DrawingClient\\DrawingClient.csproj|solutionrelative:drawingclient\\network\\clientnetwork.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{18FBF7D8-2219-4F47-8826-6246E3F22FC4}|DrawingServer\\DrawingServer.csproj|E:\\NT106_DrawingApp\\drawingserver\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{18FBF7D8-2219-4F47-8826-6246E3F22FC4}|DrawingServer\\DrawingServer.csproj|solutionrelative:drawingserver\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|E:\\NT106_DrawingApp\\sharedlib\\packets\\packethelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|solutionrelative:sharedlib\\packets\\packethelper.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|E:\\NT106_DrawingApp\\sharedlib\\packets\\packetdef.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|solutionrelative:sharedlib\\packets\\packetdef.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|E:\\NT106_DrawingApp\\sharedlib\\payloads\\claimpayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|solutionrelative:sharedlib\\payloads\\claimpayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|E:\\NT106_DrawingApp\\sharedlib\\payloads\\interactionpayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|solutionrelative:sharedlib\\payloads\\interactionpayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|E:\\NT106_DrawingApp\\sharedlib\\payloads\\roompayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|solutionrelative:sharedlib\\payloads\\roompayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|E:\\NT106_DrawingApp\\sharedlib\\payloads\\authpayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|solutionrelative:sharedlib\\payloads\\authpayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|E:\\NT106_DrawingApp\\sharedlib\\payloads\\drawpayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|solutionrelative:sharedlib\\payloads\\drawpayload.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|E:\\NT106_DrawingApp\\sharedlib\\class1.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{D317D904-806E-4B38-8B01-5874C33608DD}|SharedLib\\SharedLib.csproj|solutionrelative:sharedlib\\class1.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{31A18805-599B-462E-85FF-8EB784FA6E79}|LoadBalancer\\LoadBalancer.csproj|E:\\NT106_DrawingApp\\loadbalancer\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{31A18805-599B-462E-85FF-8EB784FA6E79}|LoadBalancer\\LoadBalancer.csproj|solutionrelative:loadbalancer\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     }
   ],
   "DocumentGroupContainers": [
@@ -74,7 +42,7 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 1,
+          "SelectedChildIndex": 6,
           "Children": [
             {
               "$type": "Bookmark",
@@ -82,28 +50,41 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 0,
-              "Title": "LobbyForm.cs",
-              "DocumentMoniker": "E:\\NT106_DrawingApp\\DrawingClient\\Forms\\LobbyForm.cs",
-              "RelativeDocumentMoniker": "DrawingClient\\Forms\\LobbyForm.cs",
-              "ToolTip": "E:\\NT106_DrawingApp\\DrawingClient\\Forms\\LobbyForm.cs",
-              "RelativeToolTip": "DrawingClient\\Forms\\LobbyForm.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAoAAAAeAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-18T19:24:28.079Z",
-              "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 5,
               "Title": "MainForm.cs",
               "DocumentMoniker": "E:\\NT106_DrawingApp\\DrawingClient\\Forms\\MainForm.cs",
               "RelativeDocumentMoniker": "DrawingClient\\Forms\\MainForm.cs",
               "ToolTip": "E:\\NT106_DrawingApp\\DrawingClient\\Forms\\MainForm.cs",
               "RelativeToolTip": "DrawingClient\\Forms\\MainForm.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAABEAAAAmAAAAAAAAAA==",
+              "ViewState": "AgIAAIEAAAAAAAAAAAApwI0AAAAqAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-18T19:23:55.266Z",
+              "WhenOpened": "2026-03-18T20:20:02.963Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "UndoStack.cs",
+              "DocumentMoniker": "E:\\NT106_DrawingApp\\DrawingClient\\Drawing\\UndoStack.cs",
+              "RelativeDocumentMoniker": "DrawingClient\\Drawing\\UndoStack.cs",
+              "ToolTip": "E:\\NT106_DrawingApp\\DrawingClient\\Drawing\\UndoStack.cs",
+              "RelativeToolTip": "DrawingClient\\Drawing\\UndoStack.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAkAAAARAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-18T20:16:19.711Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "CursorLayer.cs",
+              "DocumentMoniker": "E:\\NT106_DrawingApp\\DrawingClient\\UI\\CursorLayer.cs",
+              "RelativeDocumentMoniker": "DrawingClient\\UI\\CursorLayer.cs",
+              "ToolTip": "E:\\NT106_DrawingApp\\DrawingClient\\UI\\CursorLayer.cs",
+              "RelativeToolTip": "DrawingClient\\UI\\CursorLayer.cs",
+              "ViewState": "AgIAADIAAAAAAAAAAAAQwDcAAAAJAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-18T20:15:06.601Z",
               "EditorCaption": ""
             },
             {
@@ -114,168 +95,62 @@
               "RelativeDocumentMoniker": "DrawingClient\\Drawing\\CanvasManager.cs",
               "ToolTip": "E:\\NT106_DrawingApp\\DrawingClient\\Drawing\\CanvasManager.cs",
               "RelativeToolTip": "DrawingClient\\Drawing\\CanvasManager.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAEcAAAANAAAAAAAAAA==",
+              "ViewState": "AgIAAI4AAAAAAAAAAAAQwJYAAAANAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-18T19:21:36.236Z",
+              "WhenOpened": "2026-03-18T20:07:04.028Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 3,
+              "DocumentIndex": 1,
+              "Title": "FloodFill.cs",
+              "DocumentMoniker": "E:\\NT106_DrawingApp\\DrawingClient\\Drawing\\FloodFill.cs",
+              "RelativeDocumentMoniker": "DrawingClient\\Drawing\\FloodFill.cs",
+              "ToolTip": "E:\\NT106_DrawingApp\\DrawingClient\\Drawing\\FloodFill.cs",
+              "RelativeToolTip": "DrawingClient\\Drawing\\FloodFill.cs",
+              "ViewState": "AgIAAAUAAAAAAAAAAAAxwAoAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-18T20:06:09.74Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "ToastForm.cs",
+              "DocumentMoniker": "E:\\NT106_DrawingApp\\DrawingClient\\UI\\ToastForm.cs",
+              "RelativeDocumentMoniker": "DrawingClient\\UI\\ToastForm.cs",
+              "ToolTip": "E:\\NT106_DrawingApp\\DrawingClient\\UI\\ToastForm.cs",
+              "RelativeToolTip": "DrawingClient\\UI\\ToastForm.cs",
+              "ViewState": "AgIAACwAAAAAAAAAAAAAABQAAAANAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-18T20:14:50.54Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 6,
+              "Title": "TextTool.cs",
+              "DocumentMoniker": "E:\\NT106_DrawingApp\\DrawingClient\\Drawing\\TextTool.cs",
+              "RelativeDocumentMoniker": "DrawingClient\\Drawing\\TextTool.cs",
+              "ToolTip": "E:\\NT106_DrawingApp\\DrawingClient\\Drawing\\TextTool.cs",
+              "RelativeToolTip": "DrawingClient\\Drawing\\TextTool.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAABIAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-03-18T20:06:45.669Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 7,
               "Title": "DrawingTools.cs",
               "DocumentMoniker": "E:\\NT106_DrawingApp\\DrawingClient\\Drawing\\DrawingTools.cs",
               "RelativeDocumentMoniker": "DrawingClient\\Drawing\\DrawingTools.cs",
               "ToolTip": "E:\\NT106_DrawingApp\\DrawingClient\\Drawing\\DrawingTools.cs",
               "RelativeToolTip": "DrawingClient\\Drawing\\DrawingTools.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAwAAAASAAAAAAAAAA==",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAsAAAAPAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-18T19:20:53.065Z",
+              "WhenOpened": "2026-03-18T20:05:17.601Z",
               "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 4,
-              "Title": "Program.cs",
-              "DocumentMoniker": "E:\\NT106_DrawingApp\\DrawingClient\\Program.cs",
-              "RelativeDocumentMoniker": "DrawingClient\\Program.cs",
-              "ToolTip": "E:\\NT106_DrawingApp\\DrawingClient\\Program.cs",
-              "RelativeToolTip": "DrawingClient\\Program.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAABAAAAABAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-18T19:16:36.646Z",
-              "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 5,
-              "Title": "ClientNetwork.cs",
-              "DocumentMoniker": "E:\\NT106_DrawingApp\\DrawingClient\\Network\\ClientNetwork.cs",
-              "RelativeDocumentMoniker": "DrawingClient\\Network\\ClientNetwork.cs",
-              "ToolTip": "E:\\NT106_DrawingApp\\DrawingClient\\Network\\ClientNetwork.cs",
-              "RelativeToolTip": "DrawingClient\\Network\\ClientNetwork.cs",
-              "ViewState": "AgIAAAoBAAAAAAAAAAAowBABAAAAAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-04T18:40:13.716Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 6,
-              "Title": "Program.cs",
-              "DocumentMoniker": "E:\\NT106_DrawingApp\\DrawingServer\\Program.cs",
-              "RelativeDocumentMoniker": "DrawingServer\\Program.cs",
-              "ToolTip": "E:\\NT106_DrawingApp\\DrawingServer\\Program.cs",
-              "RelativeToolTip": "DrawingServer\\Program.cs",
-              "ViewState": "AgIAACUAAAAAAAAAAAAAADAAAAAAAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-04T17:50:49.968Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 9,
-              "Title": "ClaimPayload.cs",
-              "DocumentMoniker": "E:\\NT106_DrawingApp\\SharedLib\\Payloads\\ClaimPayload.cs",
-              "RelativeDocumentMoniker": "SharedLib\\Payloads\\ClaimPayload.cs",
-              "ToolTip": "E:\\NT106_DrawingApp\\SharedLib\\Payloads\\ClaimPayload.cs",
-              "RelativeToolTip": "SharedLib\\Payloads\\ClaimPayload.cs",
-              "ViewState": "AgIAAAsAAAAAAAAAAAA0wBsAAAABAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-04T18:01:07.599Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 7,
-              "Title": "PacketHelper.cs",
-              "DocumentMoniker": "E:\\NT106_DrawingApp\\SharedLib\\Packets\\PacketHelper.cs",
-              "RelativeDocumentMoniker": "SharedLib\\Packets\\PacketHelper.cs",
-              "ToolTip": "E:\\NT106_DrawingApp\\SharedLib\\Packets\\PacketHelper.cs",
-              "RelativeToolTip": "SharedLib\\Packets\\PacketHelper.cs",
-              "ViewState": "AgIAABgAAAAAAAAAAAA0wB4AAAAAAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-04T18:01:31.596Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 10,
-              "Title": "InteractionPayload.cs",
-              "DocumentMoniker": "E:\\NT106_DrawingApp\\SharedLib\\Payloads\\InteractionPayload.cs",
-              "RelativeDocumentMoniker": "SharedLib\\Payloads\\InteractionPayload.cs",
-              "ToolTip": "E:\\NT106_DrawingApp\\SharedLib\\Payloads\\InteractionPayload.cs",
-              "RelativeToolTip": "SharedLib\\Payloads\\InteractionPayload.cs",
-              "ViewState": "AgIAABoAAAAAAAAAAAAUwCoAAAABAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-04T18:00:50.88Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 11,
-              "Title": "RoomPayload.cs",
-              "DocumentMoniker": "E:\\NT106_DrawingApp\\SharedLib\\Payloads\\RoomPayload.cs",
-              "RelativeDocumentMoniker": "SharedLib\\Payloads\\RoomPayload.cs",
-              "ToolTip": "E:\\NT106_DrawingApp\\SharedLib\\Payloads\\RoomPayload.cs",
-              "RelativeToolTip": "SharedLib\\Payloads\\RoomPayload.cs",
-              "ViewState": "AgIAAC0AAAAAAAAAAAA0wD0AAAABAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-04T18:00:35.361Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 8,
-              "Title": "PacketDef.cs",
-              "DocumentMoniker": "E:\\NT106_DrawingApp\\SharedLib\\Packets\\PacketDef.cs",
-              "RelativeDocumentMoniker": "SharedLib\\Packets\\PacketDef.cs",
-              "ToolTip": "E:\\NT106_DrawingApp\\SharedLib\\Packets\\PacketDef.cs",
-              "RelativeToolTip": "SharedLib\\Packets\\PacketDef.cs",
-              "ViewState": "AgIAAHEAAAAAAAAAAAAUwHwAAAArAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-04T17:55:18.417Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 12,
-              "Title": "AuthPayload.cs",
-              "DocumentMoniker": "E:\\NT106_DrawingApp\\SharedLib\\Payloads\\AuthPayload.cs",
-              "RelativeDocumentMoniker": "SharedLib\\Payloads\\AuthPayload.cs",
-              "ToolTip": "E:\\NT106_DrawingApp\\SharedLib\\Payloads\\AuthPayload.cs",
-              "RelativeToolTip": "SharedLib\\Payloads\\AuthPayload.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAUwBAAAAABAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-04T18:00:15.415Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 13,
-              "Title": "DrawPayload.cs",
-              "DocumentMoniker": "E:\\NT106_DrawingApp\\SharedLib\\Payloads\\DrawPayload.cs",
-              "RelativeDocumentMoniker": "SharedLib\\Payloads\\DrawPayload.cs",
-              "ToolTip": "E:\\NT106_DrawingApp\\SharedLib\\Payloads\\DrawPayload.cs",
-              "RelativeToolTip": "SharedLib\\Payloads\\DrawPayload.cs",
-              "ViewState": "AgIAAAIAAAAAAAAAAAAUwBIAAAABAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-04T17:58:24.866Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 14,
-              "Title": "Class1.cs",
-              "DocumentMoniker": "E:\\NT106_DrawingApp\\SharedLib\\Class1.cs",
-              "RelativeDocumentMoniker": "SharedLib\\Class1.cs",
-              "ToolTip": "E:\\NT106_DrawingApp\\SharedLib\\Class1.cs",
-              "RelativeToolTip": "SharedLib\\Class1.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-04T17:49:59.875Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 15,
-              "Title": "Program.cs",
-              "DocumentMoniker": "E:\\NT106_DrawingApp\\LoadBalancer\\Program.cs",
-              "RelativeDocumentMoniker": "LoadBalancer\\Program.cs",
-              "ToolTip": "E:\\NT106_DrawingApp\\LoadBalancer\\Program.cs",
-              "RelativeToolTip": "LoadBalancer\\Program.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-03-04T17:51:45.417Z"
             }
           ]
         }
