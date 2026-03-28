@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.13.35825.156 d17.13
+# Visual Studio Version 18
+VisualStudioVersion = 18.4.11605.240 stable
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SharedLib", "SharedLib\SharedLib.csproj", "{D317D904-806E-4B38-8B01-5874C33608DD}"
 EndProject
@@ -10,6 +10,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DrawingClient", "DrawingClient\DrawingClient.csproj", "{65855D45-6C8C-472D-8826-285B67ECC743}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LoadBalancer", "LoadBalancer\LoadBalancer.csproj", "{31A18805-599B-462E-85FF-8EB784FA6E79}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestClients", "TestClients\TestClients.csproj", "{F7BEB95A-9D4D-4690-8AAB-36E1608781BF}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -33,6 +35,10 @@ Global
 		{31A18805-599B-462E-85FF-8EB784FA6E79}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{31A18805-599B-462E-85FF-8EB784FA6E79}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{31A18805-599B-462E-85FF-8EB784FA6E79}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F7BEB95A-9D4D-4690-8AAB-36E1608781BF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F7BEB95A-9D4D-4690-8AAB-36E1608781BF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F7BEB95A-9D4D-4690-8AAB-36E1608781BF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F7BEB95A-9D4D-4690-8AAB-36E1608781BF}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -1,4 +1,4 @@
-﻿using System;
+﻿using System.Text.Json;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
@@ -71,9 +71,127 @@ namespace DrawingServer
                 while (true)
                 {
                     int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
-                    if (bytesRead == 0) break;
+                    if (bytesRead == 0) break; // Client ngắt kết nối an toàn
 
-                    // Nơi xử lý các lệnh TCP nhận từ Client (sẽ dùng nhiều ở Tuần 3)
+                    try
+                    {
+                        // 1. Cắt lấy đúng phần dữ liệu thực tế nhận được
+                        byte[] receivedData = new byte[bytesRead];
+                        Array.Copy(buffer, receivedData, bytesRead);
+
+                        // Dùng PacketDef của B để mở gói tin
+                        Packet packet = Packet.Deserialize(receivedData);
+
+                        // 2. Xử lý lệnh Đăng nhập (LOGIN)
+                        if (packet.Cmd == CommandType.LOGIN)
+                        {
+                            string jsonPayload = Encoding.UTF8.GetString(packet.Payload);
+                            var loginData = JsonSerializer.Deserialize<System.Collections.Generic.Dictionary<string, string>>(jsonPayload);
+
+                            if (loginData != null && loginData.ContainsKey("Username") && loginData.ContainsKey("Password"))
+                            {
+                                string user = loginData["Username"];
+                                string pass = loginData["Password"];
+
+                                // Gọi hàm xuống DB để kiểm tra
+                                var dbResult = await Database.DbManager.LoginAsync(user, pass);
+
+                                // Chuẩn bị gói tin phản hồi
+                                string responseJson = $"{{\"IsSuccess\": {dbResult.IsSuccess.ToString().ToLower()}, \"Message\": \"{dbResult.Message}\"}}";
+                                Packet responsePacket = new Packet
+                                {
+                                    Cmd = CommandType.LOGIN_RESPONSE,
+                                    Payload = Encoding.UTF8.GetBytes(responseJson)
+                                };
+
+                                // Gửi kết quả về cho Client
+                                byte[] responseData = responsePacket.Serialize();
+                                await stream.WriteAsync(responseData, 0, responseData.Length);
+
+                                // Lưu Username vào Session nếu thành công
+                                if (dbResult.IsSuccess)
+                                {
+                                    session.Username = user;
+                                    Console.WriteLine($"[Auth] Client {clientId} dang nhap thanh cong voi ten '{user}'");
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"[Auth] Client {clientId} dang nhap that bai: {dbResult.Message}");
+                                }
+                            }
+                        }
+                        // 3. Xử lý lệnh Tạo phòng (CREATE_ROOM)
+                        else if (packet.Cmd == CommandType.CREATE_ROOM)
+                        {
+                            string jsonPayload = Encoding.UTF8.GetString(packet.Payload);
+                            // Dùng Dictionary tạm để linh hoạt đọc JSON
+                            var roomData = JsonSerializer.Deserialize<System.Collections.Generic.Dictionary<string, int>>(jsonPayload);
+
+                            int width = roomData != null && roomData.ContainsKey("CanvasWidth") ? roomData["CanvasWidth"] : 1280;
+                            int height = roomData != null && roomData.ContainsKey("CanvasHeight") ? roomData["CanvasHeight"] : 720;
+
+                            // Trích xuất Username từ Session (người vừa đăng nhập)
+                            string currentUser = session.Username ?? "guest";
+
+                            // Lưu xuống DB và lấy mã phòng
+                            string roomCode = await Database.DbManager.CreateRoomAsync(currentUser, width, height);
+
+                            if (!string.IsNullOrEmpty(roomCode))
+                            {
+                                // Chuẩn bị gói tin trả về chứa mã phòng
+                                string responseJson = $"{{\"RoomCode\": \"{roomCode}\", \"Message\": \"Tạo phòng thành công\"}}";
+                                Packet responsePacket = new Packet
+                                {
+                                    Cmd = CommandType.CREATE_ROOM_RESPONSE,
+                                    Payload = Encoding.UTF8.GetBytes(responseJson)
+                                };
+
+                                byte[] responseData = responsePacket.Serialize();
+                                await stream.WriteAsync(responseData, 0, responseData.Length);
+
+                                Console.WriteLine($"[Room] Client '{currentUser}' da tao phong: {roomCode}");
+                            }
+                        }
+
+                        // 4. Xử lý lệnh Vào phòng (JOIN_ROOM)
+                        else if (packet.Cmd == CommandType.JOIN_ROOM)
+                        {
+                            string jsonPayload = Encoding.UTF8.GetString(packet.Payload);
+                            var joinData = JsonSerializer.Deserialize<System.Collections.Generic.Dictionary<string, string>>(jsonPayload);
+
+                            if (joinData != null && joinData.ContainsKey("RoomCode"))
+                            {
+                                string roomCode = joinData["RoomCode"];
+                                bool exists = await Database.DbManager.CheckRoomExistsAsync(roomCode);
+
+                                string responseJson;
+                                if (exists)
+                                {
+                                    responseJson = $"{{\"IsSuccess\": true, \"Message\": \"Vào phòng thành công\"}}";
+                                    Console.WriteLine($"[Room] Client '{session.Username}' da vao phong: {roomCode}");
+                                }
+                                else
+                                {
+                                    responseJson = $"{{\"IsSuccess\": false, \"Message\": \"Phòng không tồn tại\"}}";
+                                    Console.WriteLine($"[Room] Client '{session.Username}' vao phong THAT BAI: {roomCode}");
+                                }
+
+                                Packet responsePacket = new Packet
+                                {
+                                    Cmd = CommandType.JOIN_ROOM_RESPONSE,
+                                    Payload = Encoding.UTF8.GetBytes(responseJson)
+                                };
+
+                                byte[] responseData = responsePacket.Serialize();
+                                await stream.WriteAsync(responseData, 0, responseData.Length);
+                            }
+                        }
+                        // Lệnh REGISTER, CREATE_ROOM, JOIN_ROOM sẽ thêm ở đây sau...
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[TCP Parse Error] Loi khi doc packet tu {clientId}: {ex.Message}");
+                    }
                 }
             }
             catch (Exception ex)
