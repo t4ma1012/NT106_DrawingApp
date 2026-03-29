@@ -176,14 +176,40 @@ namespace DrawingServer
                                     Console.WriteLine($"[Room] Client '{session.Username}' vao phong THAT BAI: {roomCode}");
                                 }
 
+                                // BƯỚC A: Trả kết quả duyệt cho vào phòng (JOIN_ROOM_RESPONSE) trước
                                 Packet responsePacket = new Packet
                                 {
                                     Cmd = CommandType.JOIN_ROOM_RESPONSE,
                                     Payload = Encoding.UTF8.GetBytes(responseJson)
                                 };
-
                                 byte[] responseData = responsePacket.Serialize();
                                 await stream.WriteAsync(responseData, 0, responseData.Length);
+
+                                // BƯỚC B: NẾU VÀO PHÒNG THÀNH CÔNG -> GỬI ĐỒNG BỘ LỊCH SỬ VẼ (SYNC_BOARD)
+                                if (exists)
+                                {
+                                    // "Dán nhãn" mã phòng cho session này
+                                    session.RoomCode = roomCode;
+
+                                    // Lôi toàn bộ lịch sử nét vẽ từ Database ra
+                                    var history = await Database.DbManager.GetRoomHistoryAsync(roomCode);
+
+                                    if (history.Count > 0)
+                                    {
+                                        // Gom tất cả nét vẽ thành 1 mảng JSON (ví dụ: [{net1}, {net2}])
+                                        string historyJson = "[" + string.Join(",", history) + "]";
+
+                                        Packet syncPacket = new Packet
+                                        {
+                                            Cmd = CommandType.SYNC_BOARD, // Lệnh 0x40 theo chuẩn PacketDef
+                                            Payload = Encoding.UTF8.GetBytes(historyJson)
+                                        };
+                                        byte[] syncData = syncPacket.Serialize();
+                                        await stream.WriteAsync(syncData, 0, syncData.Length);
+
+                                        Console.WriteLine($"[Sync] Da gui {history.Count} net ve cu cho Client '{session.Username}'");
+                                    }
+                                }
                             }
                         }
                         // Lệnh REGISTER, CREATE_ROOM, JOIN_ROOM sẽ thêm ở đây sau...

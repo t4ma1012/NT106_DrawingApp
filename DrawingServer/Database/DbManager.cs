@@ -101,5 +101,68 @@ namespace DrawingServer.Database
                 return false;
             }
         }
+        // Hàm 1: Lưu nét vẽ vào Database (DrawHistory)
+        public static async Task<bool> SaveStrokeAsync(string roomCode, string actionId, string strokeDataJson, string username)
+        {
+            try
+            {
+                using var conn = new NpgsqlConnection(ConnectionString);
+                await conn.OpenAsync();
+
+                // Dùng Subquery để tự động tìm room_id từ roomCode, lưu chuỗi JSON vào cột stroke_data
+                string sql = @"
+                    INSERT INTO DrawHistory (room_id, action_id, stroke_data, username) 
+                    VALUES ((SELECT id FROM Rooms WHERE room_code = @code), @actionId, @strokeData::jsonb, @user)";
+
+                using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("code", roomCode);
+
+                // Parse chuỗi actionId thành UUID, nếu không có thì tự tạo mới
+                cmd.Parameters.AddWithValue("actionId", Guid.TryParse(actionId, out Guid guid) ? guid : Guid.NewGuid());
+                cmd.Parameters.AddWithValue("strokeData", strokeDataJson);
+                cmd.Parameters.AddWithValue("user", username);
+
+                await cmd.ExecuteNonQueryAsync();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DB Error] SaveStroke: {ex.Message}");
+                return false;
+            }
+        }
+
+        // Hàm 2: Lấy toàn bộ lịch sử vẽ của một phòng để Đồng bộ (Sync)
+        public static async Task<System.Collections.Generic.List<string>> GetRoomHistoryAsync(string roomCode)
+        {
+            var history = new System.Collections.Generic.List<string>();
+            try
+            {
+                using var conn = new NpgsqlConnection(ConnectionString);
+                await conn.OpenAsync();
+
+                // Lấy tất cả nét vẽ của phòng đó, sắp xếp theo thời gian cũ -> mới
+                string sql = @"
+                    SELECT stroke_data 
+                    FROM DrawHistory 
+                    WHERE room_id = (SELECT id FROM Rooms WHERE room_code = @code) 
+                    ORDER BY timestamp ASC";
+
+                using var cmd = new NpgsqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("code", roomCode);
+
+                using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    // Lấy chuỗi JSON của nét vẽ nhét vào danh sách
+                    history.Add(reader.GetString(0));
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DB Error] GetRoomHistory: {ex.Message}");
+            }
+            return history;
+        }
     }
 }
