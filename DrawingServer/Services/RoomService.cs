@@ -14,29 +14,24 @@ using SharedLib.Logging;
 
 namespace DrawingServer.Services
 {
-    /// <summary>
-    /// Manages room creation, member joining/leaving, room state, etc.
-    /// Coordinates with ClientSession and DbManager.
-    /// </summary>
     public static class RoomService
     {
-        // In-memory cache of active rooms
         private static Dictionary<string, RoomState> _activeRooms = new Dictionary<string, RoomState>();
 
         public class RoomState
         {
             public string RoomCode { get; set; }
             public string OwnerId { get; set; }
-            public List<ClientSession> Members { get; set; } = new List<ClientSession>();
+
+            // Ép buộc dùng đúng ClientSession "hàng real" của Network
+            public List<DrawingServer.Network.ClientSession> Members { get; set; } = new List<DrawingServer.Network.ClientSession>();
+
             public int CanvasWidth { get; set; } = 1280;
             public int CanvasHeight { get; set; } = 720;
             public DateTime CreatedTime { get; set; }
             public bool IsActive { get; set; } = true;
         }
 
-        /// <summary>
-        /// Create a new room.
-        /// </summary>
         public static async Task<(bool Success, string RoomCode, string Message)> CreateRoomAsync(string ownerUsername, int canvasWidth = 1280, int canvasHeight = 720)
         {
             try
@@ -44,13 +39,11 @@ namespace DrawingServer.Services
                 if (string.IsNullOrWhiteSpace(ownerUsername))
                     return (false, "", "Invalid owner username");
 
-                // Get through database (auto-generates room code)
                 string roomCode = await DbManager.CreateRoomAsync(ownerUsername, canvasWidth, canvasHeight);
 
                 if (string.IsNullOrEmpty(roomCode))
                     return (false, "", "Failed to create room in database");
 
-                // Store in memory cache
                 lock (_activeRooms)
                 {
                     if (!_activeRooms.ContainsKey(roomCode))
@@ -77,10 +70,8 @@ namespace DrawingServer.Services
             }
         }
 
-        /// <summary>
-        /// Add member to existing room.
-        /// </summary>
-        public static async Task<bool> AddMemberToRoomAsync(string roomCode, ClientSession clientSession)
+        // Ép buộc tham số truyền vào phải là "hàng real"
+        public static async Task<bool> AddMemberToRoomAsync(string roomCode, DrawingServer.Network.ClientSession clientSession)
         {
             try
             {
@@ -98,7 +89,6 @@ namespace DrawingServer.Services
                 {
                     if (!_activeRooms.ContainsKey(roomCode))
                     {
-                        // Room exists in DB but not in memory (server restart scenario)
                         _activeRooms[roomCode] = new RoomState
                         {
                             RoomCode = roomCode,
@@ -109,7 +99,7 @@ namespace DrawingServer.Services
                     var room = _activeRooms[roomCode];
                     if (!room.Members.Any(m => m.Username == clientSession.Username))
                     {
-                        clientSession.RoomCode = roomCode;
+                        clientSession.RoomCode = roomCode; // Sẽ không còn lỗi đỏ ở đây nữa
                         room.Members.Add(clientSession);
                         Logger.Info("Room", $"Added {clientSession.Username} to room {roomCode} ({room.Members.Count} members)");
                     }
@@ -124,9 +114,6 @@ namespace DrawingServer.Services
             }
         }
 
-        /// <summary>
-        /// Remove member from room.
-        /// </summary>
         public static bool RemoveMemberFromRoom(string roomCode, string username)
         {
             try
@@ -143,7 +130,6 @@ namespace DrawingServer.Services
                         room.Members.Remove(member);
                         Logger.Info("Room", $"Removed {username} from room {roomCode} ({room.Members.Count} members left)");
 
-                        // If room is empty, mark as inactive
                         if (room.Members.Count == 0)
                         {
                             room.IsActive = false;
@@ -160,9 +146,6 @@ namespace DrawingServer.Services
             }
         }
 
-        /// <summary>
-        /// Get all members in a room (for UI sync).
-        /// </summary>
         public static List<(string Username, string Color, bool IsOnline)> GetRoomMembers(string roomCode)
         {
             var members = new List<(string, string, bool)>();
@@ -182,7 +165,6 @@ namespace DrawingServer.Services
                     }
                     else
                     {
-                        // Fallback to session's assigned color if not in auth cache
                         members.Add((clientSession.Username, clientSession.AssignedColor, true));
                     }
                 }
@@ -191,9 +173,6 @@ namespace DrawingServer.Services
             return members;
         }
 
-        /// <summary>
-        /// Get room state (canvas size, etc.).
-        /// </summary>
         public static RoomState GetRoomState(string roomCode)
         {
             lock (_activeRooms)
@@ -204,9 +183,6 @@ namespace DrawingServer.Services
             return null;
         }
 
-        /// <summary>
-        /// Check if room is active and has members.
-        /// </summary>
         public static bool IsRoomActive(string roomCode)
         {
             lock (_activeRooms)
@@ -217,9 +193,6 @@ namespace DrawingServer.Services
             return false;
         }
 
-        /// <summary>
-        /// Get all currently active rooms count.
-        /// </summary>
         public static int GetActiveRoomsCount()
         {
             lock (_activeRooms)
@@ -228,9 +201,6 @@ namespace DrawingServer.Services
             }
         }
 
-        /// <summary>
-        /// Get member count for a room.
-        /// </summary>
         public static int GetRoomMemberCount(string roomCode)
         {
             lock (_activeRooms)
@@ -241,9 +211,6 @@ namespace DrawingServer.Services
             return 0;
         }
 
-        /// <summary>
-        /// Broadcast a packet to all members in a room via UDP.
-        /// </summary>
         public static async Task BroadcastToRoomAsync(string roomCode, byte[] encryptedData)
         {
             lock (_activeRooms)
@@ -257,7 +224,6 @@ namespace DrawingServer.Services
                     {
                         try
                         {
-                            // Asynchronously send (fire and forget)
                             _ = Task.Run(async () =>
                             {
                                 try
@@ -275,9 +241,6 @@ namespace DrawingServer.Services
             }
         }
 
-        /// <summary>
-        /// Get all users in a specific room for display.
-        /// </summary>
         public static List<MemberInfo> GetRoomMembersInfo(string roomCode)
         {
             var infos = new List<MemberInfo>();
@@ -292,9 +255,7 @@ namespace DrawingServer.Services
                     var authSession = AuthService.GetUserSession(client.Username);
                     if (authSession != null)
                     {
-                        // Parse hex color to ARGB int
-                        int colorARGB = int.Parse(authSession.AssignedColor.TrimStart('#'), 
-                            System.Globalization.NumberStyles.HexNumber);
+                        int colorARGB = int.Parse(authSession.AssignedColor.TrimStart('#'), System.Globalization.NumberStyles.HexNumber);
 
                         infos.Add(new MemberInfo
                         {

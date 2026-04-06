@@ -1,6 +1,7 @@
 // ============================================================
 // SharedLib/Payloads/SyncPayload.cs
 // ============================================================
+using System;
 using System.Collections.Generic;
 
 namespace SharedLib.Payloads
