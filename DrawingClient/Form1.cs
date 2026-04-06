@@ -11,7 +11,7 @@ namespace DrawingClient
 
         public Form1()
         {
-            InitializeComponent();
+            //InitializeComponent();
 
             // Gọi hàm test kết nối ngay khi Form vừa khởi tạo xong
             TestConnection();

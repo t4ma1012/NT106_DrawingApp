@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 // DrawingClient/Network/NetworkEvents.cs
 // Tuần 2→8 — Tất cả events từ network → UI
 // Person A subscribe events này trong MainForm/LobbyForm
