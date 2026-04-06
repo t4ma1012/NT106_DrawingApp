@@ -6,6 +6,7 @@
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
     <ProjectGuid>{D317D904-806E-4B38-8B01-5874C33608DD}</ProjectGuid>
     <OutputType>Library</OutputType>
+    <LangVersion>8.0</LangVersion>
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>SharedLib</RootNamespace>
     <AssemblyName>SharedLib</AssemblyName>
@@ -44,19 +45,44 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AI\ApiConfig.cs" />
     <Compile Include="Class1.cs" />
+    <Compile Include="Logging\Logger.cs" />
+    <Compile Include="obj\Debug\.NETFramework,Version=v4.7.2.AssemblyAttributes.cs" />
     <Compile Include="Packets\PacketDef.cs" />
     <Compile Include="Packets\PacketHelper.cs" />
+    <Compile Include="Payloads\AiPayload.cs" />
     <Compile Include="Payloads\AuthPayload.cs" />
     <Compile Include="Payloads\ClaimPayload.cs" />
     <Compile Include="Payloads\DrawPayload.cs" />
+    <Compile Include="Payloads\GalleryPayload.cs" />
+    <Compile Include="Payloads\GifExportPayload.cs" />
     <Compile Include="Payloads\InteractionPayload.cs" />
     <Compile Include="Payloads\RoomPayload.cs" />
+    <Compile Include="Payloads\SyncPayload.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Security\AesHelper.cs" />
+    <Compile Include="Security\SecurityConfig.cs" />
   </ItemGroup>
-  <ItemGroup />
   <ItemGroup>
+    <Content Include="bin\Debug\Newtonsoft.Json.dll" />
+    <Content Include="bin\Debug\Newtonsoft.Json.xml" />
+    <Content Include="bin\Debug\SharedLib.dll" />
+    <Content Include="bin\Debug\SharedLib.pdb" />
+    <Content Include="obj\Debug\SharedLib.csproj.FileListAbsolute.txt" />
+    <Content Include="obj\Debug\SharedLib.dll" />
+    <Content Include="obj\Debug\SharedLib.pdb" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include=".vs\SharedLib.csproj.dtbcache.json" />
+    <None Include="obj\Debug\DesignTimeResolveAssemblyReferencesInput.cache" />
+    <None Include="obj\Debug\SharedLib.csproj.AssemblyReference.cache" />
+    <None Include="obj\Debug\SharedLib.csproj.CoreCompileInputs.cache" />
+    <None Include="obj\Debug\SharedLib.csproj.Up2Date" />
     <None Include="packages.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="obj\Debug\TempPE\" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

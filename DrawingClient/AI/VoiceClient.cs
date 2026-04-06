@@ -4,6 +4,7 @@
 // Dùng System.Speech.Recognition (.NET Framework built-in)
 // Offline hoàn toàn, không cần API key, không cần internet
 // ============================================================
+using SharedLib.Packets;
 using System;
 using System.Collections.Generic;
 using System.Speech.Recognition;
@@ -183,7 +184,7 @@ namespace DrawingClient.AI
             if (IsActionCommand(voiceCommand, "clear"))
                 return CommandType.CLEAR_ALL;
 
-            return (CommandType)(-1);  // Unknown
+            return (CommandType)255;  // Unknown
         }
 
         private static bool IsToolCommand(string cmd, string tool)

@@ -49,7 +49,7 @@ namespace DrawingClient.Network
                     var ssl = new SslStream(_tcpClient.GetStream(), false,
                         (s, cert, chain, err) => true);   // chấp nhận self-signed
                     ssl.AuthenticateAsClient("DrawingServer",
-                        null, SslProtocols.Tls12 | SslProtocols.Tls13, false);
+                        null, SslProtocols.Tls12, false);
                     _stream = ssl;
                     Logger.Info("ClientNetwork", "Kết nối SSL thành công.");
                 }

@@ -45,4 +45,11 @@ namespace SharedLib.Payloads
         public string PublicToken { get; set; }
         public string PublicUrl { get; set; }
     }
+
+    public class SaveGalleryResponse
+    {
+        public bool IsSuccess { get; set; }
+        public string Message { get; set; }
+        public string GalleryUrl { get; set; }
+    }
 }
