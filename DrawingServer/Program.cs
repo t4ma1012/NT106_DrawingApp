@@ -1,53 +1,32 @@
-﻿using SharedLib.Packets;
-using SharedLib.Payloads;
-using System;
+﻿using System;
+using System.Threading.Tasks;
+using DrawingServer.Network;
+using SharedLib.Logging;
 
-class Program
+namespace DrawingServer
 {
-    static void Main(string[] args)
+    class Program
     {
-        Console.WriteLine("=== TEST PACKET SERIALIZE ===");
-
-        // Test 1: DrawPayload
-        var draw = new DrawPayload
+        static async Task Main(string[] args)
         {
-            Username = "Người A",
-            ToolType = "line",
-            X1 = 100,
-            Y1 = 200,
-            X2 = 300,
-            Y2 = 400,
-            ColorARGB = -65536, // màu đỏ
-            Thickness = 3
-        };
+            // Bật Logging
+            Logger.Initialize("server_logs.txt");
+            Console.WriteLine("Khởi động Drawing Server...");
 
-        Packet p1 = PacketHelper.Create(CommandType.DRAW, draw);
-        byte[] bytes = p1.Serialize();
-        Packet p1Back = Packet.Deserialize(bytes);
-        DrawPayload back = PacketHelper.GetPayload<DrawPayload>(p1Back);
+            // KHÚC NÀY QUAN TRỌNG: Server cần 1 file chứng chỉ server.pfx để chạy TLS
+            // Tạm thời mình để file tên là "server.pfx" và mật khẩu "123456"
+            // (Lát nữa mình sẽ chỉ bạn cách tạo file này bằng 1 dòng lệnh)
+            string pfxPath = "server.pfx";
+            string pfxPassword = "123456";
 
-        Console.WriteLine($"ActionID khớp : {draw.ActionID == back.ActionID}");
-        Console.WriteLine($"Username khớp : {draw.Username == back.Username}");
-        Console.WriteLine($"X1 khớp       : {draw.X1 == back.X1}");
-        Console.WriteLine($"ToolType khớp : {draw.ToolType == back.ToolType}");
+            SecureTcpServer tcpServer = new SecureTcpServer();
+            SecureUdpServer udpServer = new SecureUdpServer();
 
-        // Test 2: LoginPayload
-        var login = new LoginPayload { Username = "test", Password = "123456" };
-        Packet p2 = PacketHelper.Create(CommandType.LOGIN, login);
-        byte[] bytes2 = p2.Serialize();
-        Packet p2Back = Packet.Deserialize(bytes2);
-        LoginPayload lBack = PacketHelper.GetPayload<LoginPayload>(p2Back);
+            // Chạy UDP ngầm
+            _ = Task.Run(() => udpServer.StartAsync());
 
-        Console.WriteLine($"\nLogin Username khớp : {login.Username == lBack.Username}");
-        Console.WriteLine($"Login Password khớp : {login.Password == lBack.Password}");
-
-        // Test 3: 100 ActionID phải unique
-        var ids = new System.Collections.Generic.HashSet<string>();
-        for (int i = 0; i < 100; i++)
-            ids.Add(new DrawPayload().ActionID);
-        Console.WriteLine($"\n100 ActionID unique : {ids.Count == 100}");
-
-        Console.WriteLine("\n=== TẤT CẢ TEST PASSED ===");
-        Console.ReadKey();
+            // Chạy TCP chính
+            await tcpServer.StartAsync(pfxPath, pfxPassword);
+        }
     }
 }

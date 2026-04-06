@@ -12,6 +12,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 using SharedLib.Packets;
 
+
 namespace DrawingClient.Network
 {
     /// <summary>
@@ -45,7 +46,7 @@ namespace DrawingClient.Network
                 );
 
                 await _sslStream.AuthenticateAsClientAsync(serverName, null,
-                    SslProtocols.Tls12 | SslProtocols.Tls13, false);
+                    SslProtocols.Tls12, false);
 
                 return true;
             }
