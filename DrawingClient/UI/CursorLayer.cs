@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using SharedLib.Payloads;
 using System.Windows.Forms;
 
 namespace DrawingClient.UI
@@ -10,6 +11,7 @@ namespace DrawingClient.UI
         private PictureBox canvas;
         public Dictionary<string, Point> OtherCursors { get; set; } = new Dictionary<string, Point>();
         public Dictionary<string, Point> OtherLasers { get; set; } = new Dictionary<string, Point>();
+        private readonly object _cursorLock = new object();
 
         private class EmojiAnim
         {
@@ -37,6 +39,43 @@ namespace DrawingClient.UI
             emojis.Add(new EmojiAnim { Emoji = emoji, Position = startLocation });
         }
 
+        public void UpdateCursor(CursorPayload payload)
+        {
+            if (payload == null || string.IsNullOrWhiteSpace(payload.Username))
+                return;
+
+            if (canvas.InvokeRequired)
+            {
+                canvas.BeginInvoke(new Action(() => UpdateCursor(payload)));
+                return;
+            }
+
+            lock (_cursorLock)
+            {
+                OtherCursors[payload.Username] = new Point(payload.X, payload.Y);
+            }
+            canvas.Invalidate();
+        }
+
+        public void RemoveCursor(string username)
+        {
+            if (string.IsNullOrWhiteSpace(username))
+                return;
+
+            if (canvas.InvokeRequired)
+            {
+                canvas.BeginInvoke(new Action(() => RemoveCursor(username)));
+                return;
+            }
+
+            lock (_cursorLock)
+            {
+                if (OtherCursors.ContainsKey(username))
+                    OtherCursors.Remove(username);
+            }
+            canvas.Invalidate();
+        }
+
         private void AnimationTimer_Tick(object sender, EventArgs e)
         {
             isLaserVisible = !isLaserVisible;
@@ -56,10 +95,12 @@ namespace DrawingClient.UI
         {
             Graphics g = e.Graphics;
 
-            foreach (var cursor in OtherCursors)
+            lock (_cursorLock)
             {
-                g.FillEllipse(Brushes.Blue, cursor.Value.X, cursor.Value.Y, 8, 8);
-                g.DrawString(cursor.Key, new Font("Arial", 8), Brushes.Black, cursor.Value.X + 10, cursor.Value.Y);
+                foreach (var cursor in OtherCursors)
+                {
+                    DrawRemoteCursor(g, cursor.Key, cursor.Value);
+                }
             }
 
             if (isLaserVisible)
@@ -75,6 +116,37 @@ namespace DrawingClient.UI
                 using (SolidBrush brush = new SolidBrush(Color.FromArgb((int)em.Alpha, 0, 0, 0)))
                 {
                     g.DrawString(em.Emoji, new Font("Segoe UI Emoji", 24), brush, em.Position);
+                }
+            }
+        }
+
+        private void DrawRemoteCursor(Graphics g, string username, Point location)
+        {
+            Point[] cursorShape = new[]
+            {
+                new Point(location.X, location.Y),
+                new Point(location.X, location.Y + 14),
+                new Point(location.X + 5, location.Y + 10),
+                new Point(location.X + 8, location.Y + 18),
+                new Point(location.X + 11, location.Y + 17),
+                new Point(location.X + 8, location.Y + 9),
+                new Point(location.X + 14, location.Y + 9)
+            };
+
+            using (Brush cursorBrush = new SolidBrush(Color.DeepSkyBlue))
+            using (Pen borderPen = new Pen(Color.White, 1.2f))
+            using (Font nameFont = new Font("Arial", 8, FontStyle.Bold))
+            {
+                g.FillPolygon(cursorBrush, cursorShape);
+                g.DrawPolygon(borderPen, cursorShape);
+
+                SizeF textSize = g.MeasureString(username, nameFont);
+                RectangleF labelRect = new RectangleF(location.X + 16, location.Y - 1, textSize.Width + 8, textSize.Height + 2);
+                using (Brush labelBack = new SolidBrush(Color.FromArgb(180, 0, 0, 0)))
+                using (Brush labelText = new SolidBrush(Color.White))
+                {
+                    g.FillRectangle(labelBack, labelRect);
+                    g.DrawString(username, nameFont, labelText, location.X + 20, location.Y);
                 }
             }
         }

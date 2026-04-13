@@ -1,4 +1,5 @@
 ﻿using DrawingClient.Drawing;
+using DrawingClient.Network;
 using DrawingClient.UI;
 using System;
 using System.Drawing;
@@ -25,6 +26,7 @@ namespace DrawingClient.Forms
         {
             InitializeUI();
             canvasManager = new CanvasManager(canvas);
+            SubscribeNetworkEvents();
             canvasManager.OnColorPicked = (color) =>
             {
                 btnColorPicker.BackColor = color;
@@ -35,6 +37,56 @@ namespace DrawingClient.Forms
             {
                 // NetworkClient.SendDrawUDP(payload); - Sẽ ghép nối sau
             };
+
+            this.FormClosed += MainForm_FormClosed;
+        }
+
+        private void SubscribeNetworkEvents()
+        {
+            NetworkEvents.OnCursorReceived += NetworkEvents_OnCursorReceived;
+            NetworkEvents.OnUserJoined += NetworkEvents_OnUserJoined;
+            NetworkEvents.OnUserLeft += NetworkEvents_OnUserLeft;
+        }
+
+        private void MainForm_FormClosed(object sender, FormClosedEventArgs e)
+        {
+            NetworkEvents.OnCursorReceived -= NetworkEvents_OnCursorReceived;
+            NetworkEvents.OnUserJoined -= NetworkEvents_OnUserJoined;
+            NetworkEvents.OnUserLeft -= NetworkEvents_OnUserLeft;
+        }
+
+        private void NetworkEvents_OnCursorReceived(SharedLib.Payloads.CursorPayload payload)
+        {
+            cursorLayer?.UpdateCursor(payload);
+        }
+
+        private void NetworkEvents_OnUserJoined(SharedLib.Payloads.UserJoinPayload payload)
+        {
+            if (payload == null || string.IsNullOrWhiteSpace(payload.Username))
+                return;
+
+            if (this.IsHandleCreated && this.InvokeRequired)
+            {
+                this.BeginInvoke(new Action(() => NetworkEvents_OnUserJoined(payload)));
+                return;
+            }
+
+            ToastForm.ShowToast(this, $"{payload.Username} đã tham gia phòng");
+        }
+
+        private void NetworkEvents_OnUserLeft(SharedLib.Payloads.UserLeavePayload payload)
+        {
+            if (payload == null || string.IsNullOrWhiteSpace(payload.Username))
+                return;
+
+            if (this.IsHandleCreated && this.InvokeRequired)
+            {
+                this.BeginInvoke(new Action(() => NetworkEvents_OnUserLeft(payload)));
+                return;
+            }
+
+            cursorLayer?.RemoveCursor(payload.Username);
+            ToastForm.ShowToast(this, $"{payload.Username} đã rời phòng");
         }
 
         private void InitializeUI()

@@ -15,3 +15,11 @@ D:\Download\NT106_DrawingApp\SharedLib\obj\Debug\SharedLib.csproj.CoreCompileInp
 D:\Download\NT106_DrawingApp\SharedLib\obj\Debug\SharedLib.csproj.Up2Date
 D:\Download\NT106_DrawingApp\SharedLib\obj\Debug\SharedLib.dll
 D:\Download\NT106_DrawingApp\SharedLib\obj\Debug\SharedLib.pdb
+E:\NT106_DrawingApp\SharedLib\bin\Debug\SharedLib.dll
+E:\NT106_DrawingApp\SharedLib\bin\Debug\SharedLib.pdb
+E:\NT106_DrawingApp\SharedLib\bin\Debug\Newtonsoft.Json.xml
+E:\NT106_DrawingApp\SharedLib\obj\Debug\SharedLib.csproj.AssemblyReference.cache
+E:\NT106_DrawingApp\SharedLib\obj\Debug\SharedLib.csproj.CoreCompileInputs.cache
+E:\NT106_DrawingApp\SharedLib\obj\Debug\SharedLib.csproj.Up2Date
+E:\NT106_DrawingApp\SharedLib\obj\Debug\SharedLib.dll
+E:\NT106_DrawingApp\SharedLib\obj\Debug\SharedLib.pdb
