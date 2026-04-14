@@ -1,17 +1,25 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
+using SharedLib.Payloads;
 
 namespace DrawingClient.Drawing
 {
     public class CanvasManager
     {
-        private PictureBox canvas;
+        private readonly PictureBox canvas;
         private Bitmap drawingSurface;
         private Graphics graphics;
         private Point previousPoint;
+        private Point currentPoint;
         private bool isDrawing;
+        private bool isClaimSelecting;
+        private Point claimStart;
+        private Point claimEnd;
+        private readonly Dictionary<string, Point> remoteCursors = new Dictionary<string, Point>();
+        private readonly object cursorLock = new object();
 
         public ToolType CurrentTool { get; set; } = ToolType.Pen;
         public Color CurrentColor { get; set; } = Color.Black;
@@ -20,9 +28,10 @@ namespace DrawingClient.Drawing
         public float ZoomFactor { get; set; } = 1.0f;
 
         public UndoStack UndoHistory { get; private set; } = new UndoStack();
-        private TextTool textTool;
+        private readonly TextTool textTool;
         public Action<Color> OnColorPicked;
         public Action<Point, Point, Color, int> OnNetworkDrawAction;
+        public Action<Rectangle> OnClaimAreaSelected;
 
         public CanvasManager(PictureBox pictureBox)
         {
@@ -65,11 +74,81 @@ namespace DrawingClient.Drawing
             if (UndoHistory.CanUndo)
             {
                 drawingSurface.Dispose();
-                drawingSurface = UndoHistory.Pop();
+                drawingSurface = UndoHistory.Undo(drawingSurface);
                 graphics = Graphics.FromImage(drawingSurface);
                 graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 canvas.Invalidate();
             }
+        }
+
+        public void Redo()
+        {
+            if (UndoHistory.CanRedo)
+            {
+                drawingSurface.Dispose();
+                drawingSurface = UndoHistory.Redo(drawingSurface);
+                graphics = Graphics.FromImage(drawingSurface);
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                canvas.Invalidate();
+            }
+        }
+
+        public void ImportImage(Image image, Rectangle targetRect)
+        {
+            if (image == null)
+                return;
+
+            UndoHistory.Push(drawingSurface);
+            graphics.DrawImage(image, targetRect);
+            canvas.Invalidate();
+        }
+
+        public void ExportImage(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath) || drawingSurface == null)
+                return;
+
+            drawingSurface.Save(filePath);
+        }
+
+        public void ApplyRemoteDraw(DrawPayload payload)
+        {
+            if (payload == null)
+                return;
+
+            using (Pen pen = new Pen(Color.FromArgb(payload.ColorARGB), payload.Thickness > 0 ? payload.Thickness : 2))
+            {
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+                graphics.DrawLine(pen, payload.X1, payload.Y1, payload.X2, payload.Y2);
+            }
+
+            canvas.Invalidate();
+        }
+
+        public void UpdateRemoteCursor(string username, Point point)
+        {
+            if (string.IsNullOrWhiteSpace(username))
+                return;
+
+            lock (cursorLock)
+            {
+                remoteCursors[username] = point;
+            }
+            canvas.Invalidate();
+        }
+
+        public void RemoveRemoteCursor(string username)
+        {
+            if (string.IsNullOrWhiteSpace(username))
+                return;
+
+            lock (cursorLock)
+            {
+                if (remoteCursors.ContainsKey(username))
+                    remoteCursors.Remove(username);
+            }
+            canvas.Invalidate();
         }
 
         private void Canvas_Paint(object sender, PaintEventArgs e)
@@ -78,6 +157,41 @@ namespace DrawingClient.Drawing
             {
                 e.Graphics.ScaleTransform(ZoomFactor, ZoomFactor);
                 e.Graphics.DrawImage(drawingSurface, Point.Empty);
+
+                if (isDrawing && (CurrentTool == ToolType.Line || CurrentTool == ToolType.Rectangle || CurrentTool == ToolType.Circle))
+                {
+                    using (Pen previewPen = new Pen(Color.FromArgb(160, CurrentColor), PenWidth))
+                    {
+                        previewPen.DashStyle = DashStyle.Dash;
+                        DrawShape(e.Graphics, previewPen, previousPoint, currentPoint, CurrentTool);
+                    }
+                }
+
+                if (isClaimSelecting)
+                {
+                    Rectangle claimRect = BuildRectangle(claimStart, claimEnd);
+                    using (Brush fill = new SolidBrush(Color.FromArgb(45, Color.DeepSkyBlue)))
+                    using (Pen border = new Pen(Color.FromArgb(170, Color.DeepSkyBlue), 1.5f))
+                    {
+                        border.DashStyle = DashStyle.Dash;
+                        e.Graphics.FillRectangle(fill, claimRect);
+                        e.Graphics.DrawRectangle(border, claimRect);
+                    }
+                }
+
+                lock (cursorLock)
+                {
+                    foreach (var cursor in remoteCursors)
+                    {
+                        using (Brush b = new SolidBrush(Color.FromArgb(180, Color.MediumPurple)))
+                        using (Font f = new Font("Arial", 8, FontStyle.Bold))
+                        using (Brush t = new SolidBrush(Color.Black))
+                        {
+                            e.Graphics.FillEllipse(b, cursor.Value.X - 4, cursor.Value.Y - 4, 8, 8);
+                            e.Graphics.DrawString(cursor.Key, f, t, cursor.Value.X + 8, cursor.Value.Y - 6);
+                        }
+                    }
+                }
             }
         }
 
@@ -126,13 +240,22 @@ namespace DrawingClient.Drawing
 
                 isDrawing = true;
                 previousPoint = actualPoint;
+                currentPoint = actualPoint;
                 UndoHistory.Push(drawingSurface);
+            }
+
+            if (e.Button == MouseButtons.Right)
+            {
+                isClaimSelecting = true;
+                claimStart = ScreenToCanvas(e.Location);
+                claimEnd = claimStart;
             }
         }
 
         private void Canvas_MouseMove(object sender, MouseEventArgs e)
         {
             Point actualPoint = ScreenToCanvas(e.Location);
+            currentPoint = actualPoint;
 
             if (isDrawing && (CurrentTool == ToolType.Pen || CurrentTool == ToolType.Eraser))
             {
@@ -149,11 +272,40 @@ namespace DrawingClient.Drawing
                 previousPoint = actualPoint;
                 canvas.Invalidate();
             }
+            else if (isDrawing && (CurrentTool == ToolType.Line || CurrentTool == ToolType.Rectangle || CurrentTool == ToolType.Circle))
+            {
+                canvas.Invalidate();
+            }
+
+            if (isClaimSelecting)
+            {
+                claimEnd = actualPoint;
+                canvas.Invalidate();
+            }
         }
 
         private void Canvas_MouseUp(object sender, MouseEventArgs e)
         {
+            if (isDrawing && (CurrentTool == ToolType.Line || CurrentTool == ToolType.Rectangle || CurrentTool == ToolType.Circle))
+            {
+                using (Pen pen = new Pen(CurrentColor, PenWidth))
+                {
+                    DrawShape(graphics, pen, previousPoint, currentPoint, CurrentTool);
+                }
+                OnNetworkDrawAction?.Invoke(previousPoint, currentPoint, CurrentColor, PenWidth);
+                canvas.Invalidate();
+            }
+
             isDrawing = false;
+
+            if (e.Button == MouseButtons.Right && isClaimSelecting)
+            {
+                isClaimSelecting = false;
+                Rectangle rect = BuildRectangle(claimStart, claimEnd);
+                if (rect.Width > 2 && rect.Height > 2)
+                    OnClaimAreaSelected?.Invoke(rect);
+                canvas.Invalidate();
+            }
         }
 
         public void ClearAll()
@@ -169,6 +321,31 @@ namespace DrawingClient.Drawing
             BackgroundColor = color;
             graphics.Clear(BackgroundColor);
             canvas.Invalidate();
+        }
+
+        private static Rectangle BuildRectangle(Point p1, Point p2)
+        {
+            int x = Math.Min(p1.X, p2.X);
+            int y = Math.Min(p1.Y, p2.Y);
+            int w = Math.Abs(p2.X - p1.X);
+            int h = Math.Abs(p2.Y - p1.Y);
+            return new Rectangle(x, y, w, h);
+        }
+
+        private static void DrawShape(Graphics g, Pen pen, Point p1, Point p2, ToolType tool)
+        {
+            switch (tool)
+            {
+                case ToolType.Line:
+                    g.DrawLine(pen, p1, p2);
+                    break;
+                case ToolType.Rectangle:
+                    g.DrawRectangle(pen, BuildRectangle(p1, p2));
+                    break;
+                case ToolType.Circle:
+                    g.DrawEllipse(pen, BuildRectangle(p1, p2));
+                    break;
+            }
         }
     }
 }
