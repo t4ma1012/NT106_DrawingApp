@@ -15,5 +15,6 @@ namespace DrawingServer
         {
             TcpClient = tcpClient;
         }
+        public string RoomCode { get; set; } = "";
     }
 }
