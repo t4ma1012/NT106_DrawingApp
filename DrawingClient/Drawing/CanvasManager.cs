@@ -202,10 +202,15 @@ namespace DrawingClient.Drawing
         {
             if (UndoHistory.CanUndo)
             {
-                drawingSurface.Dispose();
-                drawingSurface = UndoHistory.Undo(drawingSurface);
+                Bitmap current = drawingSurface;
+                Bitmap previous = UndoHistory.Undo(current);
+                if (previous == null)
+                    return;
+
+                drawingSurface = previous;
                 graphics = Graphics.FromImage(drawingSurface);
                 graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                current?.Dispose();
                 canvas.Invalidate();
             }
         }
@@ -214,10 +219,15 @@ namespace DrawingClient.Drawing
         {
             if (UndoHistory.CanRedo)
             {
-                drawingSurface.Dispose();
-                drawingSurface = UndoHistory.Redo(drawingSurface);
+                Bitmap current = drawingSurface;
+                Bitmap next = UndoHistory.Redo(current);
+                if (next == null)
+                    return;
+
+                drawingSurface = next;
                 graphics = Graphics.FromImage(drawingSurface);
                 graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                current?.Dispose();
                 canvas.Invalidate();
             }
         }

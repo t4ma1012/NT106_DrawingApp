@@ -10,7 +10,10 @@ namespace DrawingClient.Drawing
 
         public void Push(Bitmap currentCanvas)
         {
-            _undoHistory.Push((Bitmap)currentCanvas.Clone());
+            if (currentCanvas == null)
+                return;
+
+            _undoHistory.Push(new Bitmap(currentCanvas));
             ClearRedo();
         }
 
@@ -26,7 +29,7 @@ namespace DrawingClient.Drawing
                 return null;
 
             if (currentCanvas != null)
-                _redoHistory.Push((Bitmap)currentCanvas.Clone());
+                _redoHistory.Push(new Bitmap(currentCanvas));
 
             return _undoHistory.Pop();
         }
@@ -37,7 +40,7 @@ namespace DrawingClient.Drawing
                 return null;
 
             if (currentCanvas != null)
-                _undoHistory.Push((Bitmap)currentCanvas.Clone());
+                _undoHistory.Push(new Bitmap(currentCanvas));
 
             return _redoHistory.Pop();
         }
