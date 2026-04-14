@@ -89,4 +89,8 @@
 		<ProjectReference Include="..\SharedLib\SharedLib.csproj" />
 	</ItemGroup>
 
+	<ItemGroup>
+	  <Folder Include="Services\Database\" />
+	</ItemGroup>
+
 </Project>

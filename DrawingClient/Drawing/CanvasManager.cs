@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.IO;
 using System.Windows.Forms;
 using SharedLib.Payloads;
 
@@ -20,6 +22,8 @@ namespace DrawingClient.Drawing
         private Point claimEnd;
         private readonly Dictionary<string, Point> remoteCursors = new Dictionary<string, Point>();
         private readonly object cursorLock = new object();
+        private readonly List<StickerPayload> stickers = new List<StickerPayload>();
+        private readonly object stickerLock = new object();
 
         public ToolType CurrentTool { get; set; } = ToolType.Pen;
         public Color CurrentColor { get; set; } = Color.Black;
@@ -31,6 +35,8 @@ namespace DrawingClient.Drawing
         private readonly TextTool textTool;
         public Action<Color> OnColorPicked;
         public Action<Point, Point, Color, int> OnNetworkDrawAction;
+        public Action<FloodFillPayload> OnNetworkFloodFillAction;
+        public Action<DrawPayload> OnNetworkTextAction;
         public Action<Rectangle> OnClaimAreaSelected;
 
         public CanvasManager(PictureBox pictureBox)
@@ -53,10 +59,10 @@ namespace DrawingClient.Drawing
 
         public void ResizeCanvas(int width, int height)
         {
-            Bitmap newSurface = new Bitmap(width, height);
+            Bitmap newSurface = new Bitmap(width, height, PixelFormat.Format32bppArgb);
             using (Graphics g = Graphics.FromImage(newSurface))
             {
-                g.Clear(BackgroundColor);
+                g.Clear(Color.Transparent);
                 if (drawingSurface != null)
                 {
                     g.DrawImage(drawingSurface, 0, 0);
@@ -66,6 +72,129 @@ namespace DrawingClient.Drawing
             drawingSurface = newSurface;
             graphics = Graphics.FromImage(drawingSurface);
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            canvas.Invalidate();
+        }
+
+        public void ApplyRemoteText(DrawPayload payload)
+        {
+            if (payload == null || string.IsNullOrWhiteSpace(payload.Text))
+                return;
+
+            using (Font font = new Font(string.IsNullOrWhiteSpace(payload.FontName) ? "Arial" : payload.FontName, payload.FontSize <= 0 ? 14 : payload.FontSize))
+            using (Brush brush = new SolidBrush(Color.FromArgb(payload.ColorARGB)))
+            {
+                graphics.DrawString(payload.Text, font, brush, payload.X1, payload.Y1);
+            }
+            canvas.Invalidate();
+        }
+
+        public void ApplyRemoteFloodFill(FloodFillPayload payload)
+        {
+            if (payload == null)
+                return;
+
+            if (payload.X < 0 || payload.Y < 0 || payload.X >= drawingSurface.Width || payload.Y >= drawingSurface.Height)
+                return;
+
+            FloodFillHelper.Apply(drawingSurface, new Point(payload.X, payload.Y), Color.FromArgb(payload.ColorARGB));
+            canvas.Invalidate();
+        }
+
+        public void ApplyDrawAction(DrawAction action)
+        {
+            if (action == null)
+                return;
+
+            string tool = action.ToolType ?? string.Empty;
+            if (tool.Equals("FloodFill", StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyRemoteFloodFill(new FloodFillPayload
+                {
+                    X = action.X1,
+                    Y = action.Y1,
+                    ColorARGB = action.ColorARGB
+                });
+                return;
+            }
+
+            if (tool.Equals("Text", StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyRemoteText(new DrawPayload
+                {
+                    X1 = action.X1,
+                    Y1 = action.Y1,
+                    Text = action.Text,
+                    FontName = action.FontName,
+                    FontSize = action.FontSize,
+                    ColorARGB = action.ColorARGB
+                });
+                return;
+            }
+
+            ApplyRemoteDraw(new DrawPayload
+            {
+                X1 = action.X1,
+                Y1 = action.Y1,
+                X2 = action.X2,
+                Y2 = action.Y2,
+                ColorARGB = action.ColorARGB,
+                Thickness = action.Thickness
+            });
+        }
+
+        public void ApplyRemoteImportImage(ImportImagePayload payload)
+        {
+            if (payload == null || string.IsNullOrWhiteSpace(payload.ImageData))
+                return;
+
+            try
+            {
+                byte[] bytes = Convert.FromBase64String(payload.ImageData);
+                using (var ms = new MemoryStream(bytes))
+                using (var img = Image.FromStream(ms))
+                {
+                    graphics.DrawImage(img, new Rectangle(payload.X, payload.Y, payload.Width, payload.Height));
+                }
+                canvas.Invalidate();
+            }
+            catch
+            {
+            }
+        }
+
+        public void ApplyRemoteSetBackground(SetBackgroundPayload payload)
+        {
+            if (payload == null)
+                return;
+
+            BackgroundColor = Color.FromArgb(payload.ColorARGB);
+            canvas.Invalidate();
+        }
+
+        public void ApplyRemoteClearAll()
+        {
+            graphics.Clear(Color.Transparent);
+            canvas.Invalidate();
+        }
+
+        public void AddSticker(StickerPayload payload)
+        {
+            if (payload == null)
+                return;
+
+            lock (stickerLock)
+            {
+                stickers.Add(payload);
+            }
+            canvas.Invalidate();
+        }
+
+        public void ClearStickers()
+        {
+            lock (stickerLock)
+            {
+                stickers.Clear();
+            }
             canvas.Invalidate();
         }
 
@@ -156,6 +285,10 @@ namespace DrawingClient.Drawing
             if (drawingSurface != null)
             {
                 e.Graphics.ScaleTransform(ZoomFactor, ZoomFactor);
+                using (var bgBrush = new SolidBrush(BackgroundColor))
+                {
+                    e.Graphics.FillRectangle(bgBrush, new Rectangle(0, 0, drawingSurface.Width, drawingSurface.Height));
+                }
                 e.Graphics.DrawImage(drawingSurface, Point.Empty);
 
                 if (isDrawing && (CurrentTool == ToolType.Line || CurrentTool == ToolType.Rectangle || CurrentTool == ToolType.Circle))
@@ -192,6 +325,50 @@ namespace DrawingClient.Drawing
                         }
                     }
                 }
+
+                lock (stickerLock)
+                {
+                    foreach (var sticker in stickers)
+                    {
+                        DrawSticker(e.Graphics, sticker);
+                    }
+                }
+            }
+        }
+
+        private static void DrawSticker(Graphics g, StickerPayload sticker)
+        {
+            Rectangle rect = new Rectangle(sticker.X, sticker.Y, Math.Max(24, sticker.Width), Math.Max(24, sticker.Height));
+            string glyph = GetStickerGlyph(sticker.StickerID);
+
+            using (Font font = new Font("Segoe UI Emoji", Math.Max(12, rect.Height - 6), FontStyle.Regular, GraphicsUnit.Pixel))
+            using (StringFormat sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+            {
+                if (Math.Abs(sticker.Rotation) > 0.01f)
+                {
+                    var state = g.Save();
+                    g.TranslateTransform(rect.X + rect.Width / 2f, rect.Y + rect.Height / 2f);
+                    g.RotateTransform(sticker.Rotation);
+                    g.DrawString(glyph, font, Brushes.Black, new RectangleF(-rect.Width / 2f, -rect.Height / 2f, rect.Width, rect.Height), sf);
+                    g.Restore(state);
+                }
+                else
+                {
+                    g.DrawString(glyph, font, Brushes.Black, rect, sf);
+                }
+            }
+        }
+
+        private static string GetStickerGlyph(string stickerId)
+        {
+            switch (stickerId)
+            {
+                case "heart": return "❤️";
+                case "star": return "⭐";
+                case "fire": return "🔥";
+                case "idea": return "💡";
+                case "check": return "✅";
+                default: return "📌";
             }
         }
 
@@ -204,6 +381,19 @@ namespace DrawingClient.Drawing
             {
                 g.DrawString(text, font, brush, location);
             }
+
+            OnNetworkTextAction?.Invoke(new DrawPayload
+            {
+                ActionID = Guid.NewGuid().ToString(),
+                ToolType = ToolType.Text.ToString(),
+                X1 = location.X,
+                Y1 = location.Y,
+                Text = text,
+                FontName = "Arial",
+                FontSize = 14,
+                ColorARGB = color.ToArgb(),
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            });
             canvas.Invalidate();
         }
 
@@ -228,6 +418,14 @@ namespace DrawingClient.Drawing
                 {
                     UndoHistory.Push(drawingSurface);
                     FloodFillHelper.Apply(drawingSurface, actualPoint, CurrentColor);
+                    OnNetworkFloodFillAction?.Invoke(new FloodFillPayload
+                    {
+                        ActionID = Guid.NewGuid().ToString(),
+                        X = actualPoint.X,
+                        Y = actualPoint.Y,
+                        ColorARGB = CurrentColor.ToArgb(),
+                        Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                    });
                     canvas.Invalidate();
                     return;
                 }
@@ -244,7 +442,7 @@ namespace DrawingClient.Drawing
                 UndoHistory.Push(drawingSurface);
             }
 
-            if (e.Button == MouseButtons.Right)
+            if (e.Button == MouseButtons.Right && (Control.ModifierKeys & Keys.Shift) == Keys.Shift)
             {
                 isClaimSelecting = true;
                 claimStart = ScreenToCanvas(e.Location);
@@ -311,15 +509,14 @@ namespace DrawingClient.Drawing
         public void ClearAll()
         {
             UndoHistory.Push(drawingSurface);
-            graphics.Clear(BackgroundColor);
+            graphics.Clear(Color.Transparent);
+            ClearStickers();
             canvas.Invalidate();
         }
 
         public void ChangeBackgroundColor(Color color)
         {
-            UndoHistory.Push(drawingSurface);
             BackgroundColor = color;
-            graphics.Clear(BackgroundColor);
             canvas.Invalidate();
         }
 

@@ -14,6 +14,7 @@ using SharedLib.Logging;
 using System.Net.Security;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
+using Newtonsoft.Json;
 
 namespace DrawingClient.Network
 {
@@ -495,7 +496,41 @@ namespace DrawingClient.Network
 
                 // SYNC / UNDO
                 case CommandType.SYNC_BOARD:
-                    NetworkEvents.RaiseSyncBoardReceived(PacketHelper.GetPayload<SyncBoardPayload>(p));
+                    var syncPayload = PacketHelper.GetPayload<SyncBoardPayload>(p);
+                    if (syncPayload == null || syncPayload.Actions == null || syncPayload.Actions.Count == 0)
+                    {
+                        try
+                        {
+                            string raw = PacketHelper.GetRawJson(p);
+                            var drawList = JsonConvert.DeserializeObject<System.Collections.Generic.List<DrawPayload>>(raw);
+                            if (drawList != null)
+                            {
+                                var adapted = new SyncBoardPayload { RoomCode = CurrentRoomCode };
+                                foreach (var d in drawList)
+                                {
+                                    adapted.Actions.Add(new DrawAction
+                                    {
+                                        ActionID = d.ActionID,
+                                        Username = d.Username,
+                                        ToolType = d.ToolType,
+                                        X1 = d.X1,
+                                        Y1 = d.Y1,
+                                        X2 = d.X2,
+                                        Y2 = d.Y2,
+                                        ColorARGB = d.ColorARGB,
+                                        Thickness = d.Thickness,
+                                        Text = d.Text,
+                                        FontName = d.FontName,
+                                        FontSize = d.FontSize,
+                                        Timestamp = d.Timestamp
+                                    });
+                                }
+                                syncPayload = adapted;
+                            }
+                        }
+                        catch { }
+                    }
+                    NetworkEvents.RaiseSyncBoardReceived(syncPayload);
                     break;
                 case CommandType.UNDO:
                     NetworkEvents.RaiseUndoReceived(PacketHelper.GetPayload<UndoPayload>(p));
@@ -505,6 +540,14 @@ namespace DrawingClient.Network
                     break;
                 case CommandType.PLAYBACK_RESPONSE:
                     NetworkEvents.RaisePlaybackReceived(PacketHelper.GetPayload<PlaybackResponsePayload>(p));
+                    break;
+                case CommandType.TURN_CHANGE:
+                    NetworkEvents.RaiseActivityLogReceived(new ActivityLogPayload
+                    {
+                        Username = "System",
+                        Action = "Turn changed",
+                        Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                    });
                     break;
 
                 // TCP DRAW (import image, background)
