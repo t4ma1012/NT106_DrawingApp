@@ -17,7 +17,7 @@ namespace DrawingClient.Forms
         public LoginForm()
         {
             _network = new ClientNetwork();
-
+            txtUsername = new TextBox();
             this.Text = "Đăng nhập";
             this.Size = new Size(420, 290);
             this.StartPosition = FormStartPosition.CenterScreen;
@@ -120,7 +120,7 @@ namespace DrawingClient.Forms
             if (!EnsureConnected())
                 return;
 
-            lblStatus.Text = "Trang gửi thông tin xác th?c...";
+            lblStatus.Text = "Trang gửi thông tin xác thực...";
             _network.SendLogin(username, password);
         }
 
