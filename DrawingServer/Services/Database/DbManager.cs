@@ -49,21 +49,24 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
                 using var conn = new NpgsqlConnection(connString);
                 await conn.OpenAsync();
 
-                // Lấy ID người tạo
-                using var cmdUser = new NpgsqlCommand("SELECT id FROM Users WHERE username = @u", conn);
-                cmdUser.Parameters.AddWithValue("u", username);
-                var userId = Convert.ToInt32(await cmdUser.ExecuteScalarAsync());
-
                 string roomCode = new Random().Next(100000, 999999).ToString();
 
-                using var cmdRoom = new NpgsqlCommand("INSERT INTO Rooms (room_code, owner_id) VALUES (@c, @o)", conn);
+                // FIX: Đã đổi 'owner_id' thành 'created_by' và truyền thẳng username vào
+                // FIX: Bổ sung thêm lưu canvas_width và canvas_height luôn cho chuẩn
+                using var cmdRoom = new NpgsqlCommand("INSERT INTO rooms (room_code, created_by, canvas_width, canvas_height) VALUES (@c, @cb, @w, @h)", conn);
                 cmdRoom.Parameters.AddWithValue("c", roomCode);
-                cmdRoom.Parameters.AddWithValue("o", userId);
+                cmdRoom.Parameters.AddWithValue("cb", username);
+                cmdRoom.Parameters.AddWithValue("w", width);
+                cmdRoom.Parameters.AddWithValue("h", height);
                 await cmdRoom.ExecuteNonQueryAsync();
 
                 return roomCode;
             }
-            catch { return null; }
+            catch (Exception ex)
+            {
+                SharedLib.Logging.Logger.Error("DB", "Lỗi tạo phòng: " + ex.Message);
+                return null;
+            }
         }
 
         /// <summary>Kiểm tra phòng có tồn tại không</summary>
