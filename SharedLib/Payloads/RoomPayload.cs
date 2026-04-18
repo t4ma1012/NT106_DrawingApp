@@ -1,5 +1,7 @@
 ﻿// ============================================================
 // SharedLib/Payloads/RoomPayload.cs
+// ĐÃ FIX: Thêm UdpPort vào JoinRoomPayload để Server biết
+//          endpoint UDP của Client để broadcast nét vẽ về
 // ============================================================
 using System.Collections.Generic;
 
@@ -24,6 +26,10 @@ namespace SharedLib.Payloads
     {
         public string RoomCode { get; set; }
         public bool IsSpectator { get; set; } = false;
+
+        // ✅ FIX: Client gửi port UDP của mình để Server lưu lại
+        //        dùng để broadcast nét vẽ realtime qua UDP
+        public int UdpPort { get; set; } = 0;
     }
 
     public class JoinRoomResponse
