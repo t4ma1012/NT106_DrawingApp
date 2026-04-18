@@ -6,12 +6,17 @@ namespace DrawingClient
 {
     internal static class Program
     {
+        /// <summary>
+        /// The main entry point for the application.
+        /// </summary>
         [STAThread]
         static void Main()
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new MainForm());
+
+            // ĐỔI "CỬA CHÍNH" TẠI ĐÂY: Bắt đầu từ LoginForm thay vì MainForm
+            Application.Run(new LoginForm());
         }
     }
 }
