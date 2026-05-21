@@ -1,0 +1,189 @@
+// ============================================================
+// DrawingServer/Network/SecureUdpServer.cs — FIX v3
+// Thêm log chi tiết + fix broadcast FLOOD_FILL, SPRAY, TEXT
+// ============================================================
+using System;
+using System.Linq;
+using System.Net;
+using System.Net.Sockets;
+using System.Threading.Tasks;
+using SharedLib.Packets;
+using SharedLib.Security;
+using SharedLib.Logging;
+using Newtonsoft.Json.Linq;
+
+namespace DrawingServer.Network
+{
+    public class SecureUdpServer
+    {
+        private UdpClient _udpListener = null!;
+
+        public async Task StartAsync()
+        {
+            _udpListener = new UdpClient(8889);
+            Logger.Info("UDP", "Secure UDP Server đang chạy trên port 8889 (AES-256)...");
+
+            while (true)
+            {
+                try
+                {
+                    UdpReceiveResult result = await _udpListener.ReceiveAsync();
+                    _ = Task.Run(() => HandlePacketAsync(result));
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning("UDP", $"Lỗi vòng nhận UDP: {ex.Message}");
+                }
+            }
+        }
+
+        private async Task HandlePacketAsync(UdpReceiveResult result)
+        {
+            try
+            {
+                // Bước 1: Giải mã AES-256
+                byte[] decryptedBytes = AesHelper.Decrypt(result.Buffer);
+                Packet packet = Packet.Deserialize(decryptedBytes);
+
+                string jsonPayload = PacketHelper.GetRawJson(packet);
+                JObject data = JObject.Parse(jsonPayload);
+                string username = data["Username"]?.ToString() ?? "";
+
+                // Log mỗi gói nhận được (giúp debug)
+                Logger.Info("UDP", $"Nhận [{packet.Cmd}] từ {result.RemoteEndPoint} | Username='{username}'");
+
+                if (string.IsNullOrEmpty(username))
+                {
+                    Logger.Warning("UDP", "Gói không có Username, bỏ qua.");
+                    return;
+                }
+
+                // Bước 2: Tìm session TCP theo Username
+                ClientSession senderSession = null;
+                foreach (var kv in SecureTcpServer.Clients)
+                {
+                    if (string.Equals(kv.Value.Username, username, StringComparison.OrdinalIgnoreCase))
+                    {
+                        senderSession = kv.Value;
+                        break;
+                    }
+                }
+
+                if (senderSession == null)
+                {
+                    Logger.Warning("UDP", $"Không tìm thấy TCP session cho username '{username}'. Danh sách clients hiện tại:");
+                    foreach (var kv in SecureTcpServer.Clients)
+                        Logger.Warning("UDP", $"  -> key={kv.Key}, username='{kv.Value.Username}', room='{kv.Value.RoomCode}'");
+                    return;
+                }
+
+                // Bước 3: Lưu UdpEndPoint lần đầu
+                if (senderSession.UdpEndPoint == null)
+                {
+                    senderSession.UdpEndPoint = result.RemoteEndPoint;
+                    Logger.Info("UDP", $"[+] Đăng ký UDP endpoint cho '{username}': {result.RemoteEndPoint}");
+                }
+
+                // Bước 4: Lấy roomCode từ TCP session
+                string roomCode = senderSession.RoomCode;
+                if (string.IsNullOrEmpty(roomCode))
+                {
+                    Logger.Warning("UDP", $"User '{username}' chưa vào phòng nào (RoomCode rỗng).");
+                    return;
+                }
+
+                Logger.Info("UDP", $"Broadcast [{packet.Cmd}] từ '{username}' trong phòng '{roomCode}'");
+
+                // Bước 5: Xử lý theo loại lệnh
+                // ✅ FIX: Lưu DB cho tất cả lệnh vẽ (FLOOD_FILL, TEXT, SPRAY)
+                // để khi client reconnect, SYNC_BOARD trả về đầy đủ lịch sử
+                if (packet.Cmd == CommandType.FLOOD_FILL
+                 || packet.Cmd == CommandType.TEXT
+                 || packet.Cmd == CommandType.SPRAY)
+                {
+                    string actionId = data["ActionID"]?.ToString() ?? Guid.NewGuid().ToString();
+                    _ = Database.DbManager.SaveStrokeAsync(roomCode, actionId, jsonPayload, username);
+                    Logger.Info("UDP", $"[SAVE] Lưu stroke [{packet.Cmd}] ActionID={actionId} phòng {roomCode}");
+                }
+
+                if (packet.Cmd == CommandType.DRAW)
+                {
+                    string actionId = data["ActionID"]?.ToString() ?? Guid.NewGuid().ToString();
+                    _ = Database.DbManager.SaveStrokeAsync(roomCode, actionId, jsonPayload, username);
+
+                    // Gamification: +1 diem moi net ve
+                    int drawScore = Services.GamificationService.AddScore(roomCode, username, Services.GamificationService.POINTS_DRAW);
+                    if (drawScore % 10 == 0 && drawScore > 0)
+                    {
+                        var lbEntries = Services.GamificationService.GetLeaderboard(roomCode);
+                        var lbPacket = SharedLib.Packets.PacketHelper.Create(
+                            CommandType.LEADERBOARD,
+                            new SharedLib.Payloads.LeaderboardPayload
+                            {
+                                RoomCode = roomCode,
+                                Entries = lbEntries.Select(e => new SharedLib.Payloads.LeaderboardEntry
+                                    { Rank = e.Rank, Username = e.Username, Score = e.Score }).ToList()
+                            });
+                        byte[] encLb = AesHelper.Encrypt(lbPacket.Serialize());
+                        await BroadcastUdpAsync(encLb, roomCode, result.RemoteEndPoint, CommandType.LEADERBOARD);
+                    }
+                }
+                else if (packet.Cmd == CommandType.PIXEL_ART_DRAW)
+                {
+                    // Lưu ô pixel vào DB (async, không block broadcast)
+                    int row       = data["Row"]?.ToObject<int>()      ?? -1;
+                    int col       = data["Col"]?.ToObject<int>()      ?? -1;
+                    int colorArgb = data["ColorARGB"]?.ToObject<int>() ?? 0;
+
+                    if (row >= 0 && col >= 0)
+                        _ = Database.DbManager.SavePixelCellAsync(roomCode, row, col, colorArgb, username);
+
+                    Logger.Info("UDP", $"[PIXEL_ART] '{username}' tô ô ({row},{col}) màu {colorArgb:X8}");
+                }
+
+                // Bước 6: Mã hóa và broadcast
+                byte[] encryptedResponse = AesHelper.Encrypt(packet.Serialize());
+                int sentCount = await BroadcastUdpAsync(encryptedResponse, roomCode, result.RemoteEndPoint, packet.Cmd);
+                Logger.Info("UDP", $"Đã broadcast tới {sentCount} client khác.");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("UDP", $"Lỗi xử lý packet: {ex.Message}");
+            }
+        }
+
+        private async Task<int> BroadcastUdpAsync(byte[] encryptedData, string roomCode,
+            IPEndPoint senderEndPoint, CommandType cmd)
+        {
+            // CURSOR và LASER gửi cho tất cả kể cả người gửi
+            // Các lệnh vẽ bỏ qua người gửi (tránh vẽ đè lên chính mình)
+            bool skipSender = (cmd != CommandType.CURSOR && cmd != CommandType.LASER);
+            int count = 0;
+
+            foreach (var kv in SecureTcpServer.Clients)
+            {
+                ClientSession client = kv.Value;
+
+                if (client.RoomCode != roomCode) continue;
+                if (client.UdpEndPoint == null)
+                {
+                    Logger.Warning("UDP", $"Client '{client.Username}' chưa có UdpEndPoint, bỏ qua broadcast.");
+                    continue;
+                }
+                if (skipSender && client.UdpEndPoint.Equals(senderEndPoint)) continue;
+
+                try
+                {
+                    await _udpListener.SendAsync(encryptedData, encryptedData.Length, client.UdpEndPoint);
+                    count++;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning("UDP", $"Lỗi gửi UDP tới '{client.Username}': {ex.Message}");
+                }
+            }
+
+            return count;
+        }
+    }
+}
