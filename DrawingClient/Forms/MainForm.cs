@@ -1,12 +1,15 @@
+using DrawingClient.AI;
 using DrawingClient.Drawing;
 using DrawingClient.Network;
 using DrawingClient.UI;
+using SharedLib.AI;
 using SharedLib.Packets;
 using SharedLib.Payloads;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace DrawingClient.Forms
@@ -35,6 +38,10 @@ namespace DrawingClient.Forms
         private ProgressBar gifProgress;
         private Label lblGifStatus;
         private Label lblFollowState;
+        private readonly HashSet<string> locallyShownChat = new HashSet<string>();
+        private readonly Queue<string> locallyShownChatOrder = new Queue<string>();
+        private readonly HashSet<string> displayedChat = new HashSet<string>();
+        private readonly Queue<string> displayedChatOrder = new Queue<string>();
 
         private CanvasManager canvasManager;
         private StickerPickerControl stickerPicker;
@@ -131,9 +138,10 @@ namespace DrawingClient.Forms
         {
             try
             {
-                _udpManager = new UdpManager("127.0.0.1", 8889);
+                string serverIp = string.IsNullOrWhiteSpace(_network?.ServerIp) ? "127.0.0.1" : _network.ServerIp;
+                _udpManager = new UdpManager(serverIp, _network?.ServerUdpPort ?? 8889);
                 _udpManager.Start();
-                AppendLog($"UDP sẵn sàng trên port {_udpManager.LocalPort}");
+                AppendLog($"UDP sẵn sàng trên port {_udpManager.LocalPort}, server {serverIp}:{_network?.ServerUdpPort ?? 8889}");
             }
             catch (Exception ex)
             {
@@ -164,6 +172,8 @@ namespace DrawingClient.Forms
             NetworkEvents.OnStickerReceived += NetworkEvents_OnStickerReceived;
             NetworkEvents.OnStickyNoteReceived += NetworkEvents_OnStickyNoteReceived;
             NetworkEvents.OnFollowModeReceived += NetworkEvents_OnFollowModeReceived;
+            NetworkEvents.OnTurnBasedReceived += NetworkEvents_OnTurnBasedReceived;
+            NetworkEvents.OnSaveGalleryResponse += NetworkEvents_OnSaveGalleryResponse;
             NetworkEvents.OnGifExportProgress += NetworkEvents_OnGifExportProgress;
         }
 
@@ -188,6 +198,8 @@ namespace DrawingClient.Forms
             NetworkEvents.OnStickerReceived -= NetworkEvents_OnStickerReceived;
             NetworkEvents.OnStickyNoteReceived -= NetworkEvents_OnStickyNoteReceived;
             NetworkEvents.OnFollowModeReceived -= NetworkEvents_OnFollowModeReceived;
+            NetworkEvents.OnTurnBasedReceived -= NetworkEvents_OnTurnBasedReceived;
+            NetworkEvents.OnSaveGalleryResponse -= NetworkEvents_OnSaveGalleryResponse;
             NetworkEvents.OnGifExportProgress -= NetworkEvents_OnGifExportProgress;
             _udpManager?.Stop();
         }
@@ -250,7 +262,16 @@ namespace DrawingClient.Forms
                 if (colorDialog.ShowDialog() == DialogResult.OK)
                 {
                     canvasManager.ChangeBackgroundColor(colorDialog.Color);
-                    _network?.Send(CommandType.SET_BACKGROUND, new SetBackgroundPayload { Username = _network.CurrentUsername, ColorARGB = colorDialog.Color.ToArgb() });
+                    var payload = new SetBackgroundPayload
+                    {
+                        ActionID = Guid.NewGuid().ToString(),
+                        RoomCode = _roomCode,
+                        Username = _network.CurrentUsername,
+                        ColorARGB = colorDialog.Color.ToArgb(),
+                        Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                    };
+                    _network?.Send(CommandType.SET_BACKGROUND, payload);
+                    _udpManager?.SendSetBackground(payload);
                     colorToolTip.SetToolTip(btnBackColor, $"Mã màu: #{colorDialog.Color.R:X2}{colorDialog.Color.G:X2}{colorDialog.Color.B:X2}");
                 }
             };
@@ -258,6 +279,7 @@ namespace DrawingClient.Forms
             btnClearAll = new Button { Text = "Xóa toàn bộ", Location = new Point(10, 145), Size = new Size(200, 30) };
             btnClearAll.Click += (s, e) =>
             {
+                if (!EnsureCanDraw()) return;
                 canvasManager.ClearAll();
                 _network?.SendEmpty(CommandType.CLEAR_ALL);
             };
@@ -274,6 +296,7 @@ namespace DrawingClient.Forms
             Button btnUndo = new Button { Text = "Hoàn tác", Location = new Point(10, 220), Size = new Size(200, 30) };
             btnUndo.Click += (s, e) =>
             {
+                if (!EnsureCanDraw()) return;
                 canvasManager.Undo();
                 _network?.SendUndo(Guid.NewGuid().ToString());
             };
@@ -281,6 +304,7 @@ namespace DrawingClient.Forms
             Button btnRedo = new Button { Text = "Làm lại", Location = new Point(10, 255), Size = new Size(200, 30) };
             btnRedo.Click += (s, e) =>
             {
+                if (!EnsureCanDraw()) return;
                 canvasManager.Redo();
                 _network?.SendRedo(Guid.NewGuid().ToString());
             };
@@ -302,25 +326,34 @@ namespace DrawingClient.Forms
             Button btnGallery = new Button { Text = "Gallery", Location = new Point(10, 395), Size = new Size(200, 30) };
             btnGallery.Click += (s, e) => new GalleryForm(_network).Show(this);
 
-            Button btnZoomIn = new Button { Text = "Zoom +", Location = new Point(10, 430), Size = new Size(95, 30) };
+            Button btnSaveGallery = new Button { Text = "Lưu vào Gallery", Location = new Point(10, 430), Size = new Size(200, 30) };
+            btnSaveGallery.Click += (s, e) => SaveCurrentCanvasToGallery();
+
+            Button btnAiTextToDrawing = new Button { Text = "AI: Text-to-Drawing", Location = new Point(10, 465), Size = new Size(200, 30), BackColor = Color.Honeydew };
+            btnAiTextToDrawing.Click += BtnAiTextToDrawing_Click;
+
+            Button btnAiRemoveBg = new Button { Text = "AI: Xóa nền ảnh", Location = new Point(10, 500), Size = new Size(200, 30), BackColor = Color.Honeydew };
+            btnAiRemoveBg.Click += BtnAiRemoveBackground_Click;
+
+            Button btnZoomIn = new Button { Text = "Zoom +", Location = new Point(10, 535), Size = new Size(95, 30) };
             btnZoomIn.Click += (s, e) => { canvasManager.ZoomFactor = Math.Min(4f, canvasManager.ZoomFactor + 0.2f); canvas.Invalidate(); };
-            Button btnZoomOut = new Button { Text = "Zoom -", Location = new Point(115, 430), Size = new Size(95, 30) };
+            Button btnZoomOut = new Button { Text = "Zoom -", Location = new Point(115, 535), Size = new Size(95, 30) };
             btnZoomOut.Click += (s, e) => { canvasManager.ZoomFactor = Math.Max(0.2f, canvasManager.ZoomFactor - 0.2f); canvas.Invalidate(); };
 
-            ComboBox cbTools = new ComboBox { Location = new Point(10, 465), Size = new Size(200, 30), DropDownStyle = ComboBoxStyle.DropDownList };
+            ComboBox cbTools = new ComboBox { Location = new Point(10, 570), Size = new Size(200, 30), DropDownStyle = ComboBoxStyle.DropDownList };
             cbTools.Items.AddRange(Enum.GetNames(typeof(ToolType)));
             cbTools.SelectedIndex = 0;
             cbTools.SelectedIndexChanged += (s, e) => canvasManager.CurrentTool = (ToolType)cbTools.SelectedIndex;
 
-            Button btnStickerMode = new Button { Text = "Đặt sticker", Location = new Point(10, 500), Size = new Size(200, 30) };
+            Button btnStickerMode = new Button { Text = "Đặt sticker", Location = new Point(10, 605), Size = new Size(200, 30) };
             btnStickerMode.Click += (s, e) =>
             {
                 isPlacingSticker = !isPlacingSticker;
                 isStickyNoteMode = false;
-                ToastForm.ShowToast(this, isPlacingSticker ? "Click canvas để đặt sticker" : "Tắt đặt sticker");
+                ToastForm.ShowToast(this, isPlacingSticker ? "Kéo thả trên canvas để đặt kích cỡ sticker" : "Tắt đặt sticker");
             };
 
-            stickerPicker = new StickerPickerControl { Location = new Point(10, 535), Size = new Size(200, 95) };
+            stickerPicker = new StickerPickerControl { Location = new Point(10, 640), Size = new Size(200, 95) };
             stickerPicker.StickerSelected += id =>
             {
                 selectedStickerId = id;
@@ -328,7 +361,7 @@ namespace DrawingClient.Forms
                 isStickyNoteMode = false;
             };
 
-            Button btnStickyNote = new Button { Text = "Thêm ghi chú", Location = new Point(10, 635), Size = new Size(200, 30) };
+            Button btnStickyNote = new Button { Text = "Thêm ghi chú", Location = new Point(10, 740), Size = new Size(200, 30) };
             btnStickyNote.Click += (s, e) =>
             {
                 isStickyNoteMode = !isStickyNoteMode;
@@ -336,8 +369,8 @@ namespace DrawingClient.Forms
                 ToastForm.ShowToast(this, isStickyNoteMode ? "Click canvas để tạo ghi chú" : "Tắt tạo ghi chú");
             };
 
-            var txtFollowTarget = new TextBox { Location = new Point(10, 670), Size = new Size(130, 30), Text = "username" };
-            var btnFollow = new Button { Text = "Follow", Location = new Point(145, 670), Size = new Size(65, 30) };
+            var txtFollowTarget = new TextBox { Location = new Point(10, 775), Size = new Size(130, 30), Text = "username" };
+            var btnFollow = new Button { Text = "Follow", Location = new Point(145, 775), Size = new Size(65, 30) };
             btnFollow.Click += (s, e) =>
             {
                 isFollowing = !isFollowing;
@@ -345,29 +378,37 @@ namespace DrawingClient.Forms
                 lblFollowState.Text = isFollowing ? $"Đang follow: {txtFollowTarget.Text.Trim()}" : "Follow: OFF";
             };
 
-            Button btnTurnMode = new Button { Text = "Bật/Tắt vẽ theo lượt", Location = new Point(10, 705), Size = new Size(200, 30) };
+            Button btnTurnMode = new Button { Text = "Bật/Tắt vẽ theo lượt", Location = new Point(10, 810), Size = new Size(200, 30) };
             btnTurnMode.Click += (s, e) =>
             {
-                bool enable = turnPanel.IsEnabled ? false : true;
-                turnPanel.SetState(enable, _network.CurrentUsername);
-                _network?.Send(CommandType.SET_TURNBASED, new { RoomCode = _roomCode, IsEnabled = enable });
+                bool enable = !turnPanel.IsEnabled;
+                var payload = new TurnBasedPayload
+                {
+                    RoomCode = _roomCode,
+                    Username = _network.CurrentUsername,
+                    IsEnabled = enable,
+                    ActiveUser = enable ? _network.CurrentUsername : string.Empty
+                };
+                ApplyTurnBasedState(payload);
+                _network?.Send(CommandType.SET_TURNBASED, payload);
+                _udpManager?.SendTurnBased(payload);
             };
 
-            gifProgress = new ProgressBar { Location = new Point(10, 740), Size = new Size(200, 16), Minimum = 0, Maximum = 100 };
-            lblGifStatus = new Label { Location = new Point(10, 760), Size = new Size(220, 26), Text = "GIF: sẵn sàng" };
-            lblFollowState = new Label { Location = new Point(10, 790), Size = new Size(220, 26), Text = "Follow: OFF" };
+            gifProgress = new ProgressBar { Location = new Point(10, 845), Size = new Size(200, 16), Minimum = 0, Maximum = 100 };
+            lblGifStatus = new Label { Location = new Point(10, 865), Size = new Size(220, 26), Text = "GIF: sẵn sàng" };
+            lblFollowState = new Label { Location = new Point(10, 895), Size = new Size(220, 26), Text = "Follow: OFF" };
 
-            Button btnLeaveRoom = new Button { Text = "Rời phòng", Location = new Point(10, 825), Size = new Size(200, 30), BackColor = Color.LightCoral };
+            Button btnLeaveRoom = new Button { Text = "Rời phòng", Location = new Point(10, 930), Size = new Size(200, 30), BackColor = Color.LightCoral };
             btnLeaveRoom.Click += (s, e) =>
             {
-                _network?.SendEmpty(CommandType.LEAVE_ROOM);
-                this.Hide();
+                _network?.SendLeaveRoom();
                 var lobby = new LobbyForm(_network, _network.CurrentUsername);
-                lobby.ShowDialog();
-                this.Close();
+                lobby.FormClosed += (fs, fe) => this.Show();
+                lobby.Show();
+                this.Hide();
             };
 
-            Button btnToggleChat = new Button { Text = "Ẩn/Hiện Chat", Location = new Point(10, 860), Size = new Size(200, 30), BackColor = Color.LightBlue };
+            Button btnToggleChat = new Button { Text = "Ẩn/Hiện Chat", Location = new Point(10, 965), Size = new Size(200, 30), BackColor = Color.LightBlue };
             btnToggleChat.Click += (s, e) =>
             {
                 userPanel.Visible = !userPanel.Visible;
@@ -376,8 +417,8 @@ namespace DrawingClient.Forms
             toolPanel.Controls.AddRange(new Control[]
             {
                 btnColorPicker, tbPenWidth, btnBackColor, btnClearAll, cbCanvasSize,
-                btnUndo, btnRedo, btnImport, btnExport, btnExportGif, btnGallery,
-                lblPenWidth, btnZoomIn, btnZoomOut, cbTools, btnStickerMode, stickerPicker,
+                btnUndo, btnRedo, btnImport, btnExport, btnExportGif, btnGallery, btnSaveGallery,
+                btnAiTextToDrawing, btnAiRemoveBg, lblPenWidth, btnZoomIn, btnZoomOut, cbTools, btnStickerMode, stickerPicker,
                 btnStickyNote, txtFollowTarget, btnFollow, btnTurnMode, gifProgress,
                 lblGifStatus, lblFollowState, btnLeaveRoom, btnToggleChat
             });
@@ -461,6 +502,7 @@ namespace DrawingClient.Forms
 
             if (isPlacingSticker || pendingImportImage != null)
             {
+                if (!EnsureCanDraw()) return;
                 dragStartPoint = e.Location;
             }
             else if (isStickyNoteMode)
@@ -499,6 +541,8 @@ namespace DrawingClient.Forms
         {
             if (e.Button == MouseButtons.Left && isPlacingSticker)
             {
+                if (!EnsureCanDraw()) return;
+
                 Point start = canvasManager.ScreenToCanvas(dragStartPoint);
                 Point end = canvasManager.ScreenToCanvas(e.Location);
                 int width = Math.Max(24, Math.Abs(end.X - start.X));
@@ -521,12 +565,15 @@ namespace DrawingClient.Forms
 
                 canvasManager.AddSticker(payload);
                 _network?.SendSticker(payload);
+                _udpManager?.SendSticker(payload);
 
                 isPlacingSticker = false;
                 canvas.Invalidate();
             }
             else if (e.Button == MouseButtons.Left && pendingImportImage != null)
             {
+                if (!EnsureCanDraw()) return;
+
                 Point start = canvasManager.ScreenToCanvas(dragStartPoint);
                 Point end = canvasManager.ScreenToCanvas(e.Location);
                 int width = Math.Max(50, Math.Abs(end.X - start.X));
@@ -597,6 +644,8 @@ namespace DrawingClient.Forms
 
         private void BtnImport_Click(object sender, EventArgs e)
         {
+            if (!EnsureCanDraw()) return;
+
             using (OpenFileDialog openFileDialog = new OpenFileDialog())
             {
                 openFileDialog.Filter = "Image files|*.png;*.jpg;*.jpeg;*.bmp";
@@ -625,13 +674,262 @@ namespace DrawingClient.Forms
             }
         }
 
+        private async void BtnAiTextToDrawing_Click(object sender, EventArgs e)
+        {
+            if (!EnsureCanDraw()) return;
+            if (!ApiConfig.IsStabilityConfigured())
+            {
+                MessageBox.Show("Bạn chưa cấu hình Stability AI API key trong SharedLib/AI/ApiConfig.cs.", "Thiếu API key");
+                return;
+            }
+
+            string prompt = ShowPromptDialog("Text-to-Drawing", "Nhập prompt để AI tạo ảnh:");
+            if (string.IsNullOrWhiteSpace(prompt))
+                return;
+
+            await RunButtonTaskAsync(sender as Button, "AI đang tạo ảnh...", async () =>
+            {
+                byte[] imageBytes = await StabilityAiClient.GenerateImageAsync(prompt.Trim());
+                if (imageBytes == null || imageBytes.Length == 0)
+                    throw new InvalidOperationException("Stability AI không trả về ảnh.");
+
+                using (Image aiImage = CreateImageFromBytes(imageBytes))
+                {
+                    Rectangle target = BuildCenteredImageTarget(aiImage.Size);
+                    ImportImageAndBroadcast(aiImage, target);
+                }
+
+                ToastForm.ShowToast(this, "Đã thêm ảnh AI vào canvas");
+            });
+        }
+
+        private async void BtnAiRemoveBackground_Click(object sender, EventArgs e)
+        {
+            if (!EnsureCanDraw()) return;
+            if (!ApiConfig.IsRemoveBgConfigured())
+            {
+                MessageBox.Show("Bạn chưa cấu hình remove.bg API key trong SharedLib/AI/ApiConfig.cs.", "Thiếu API key");
+                return;
+            }
+
+            using (OpenFileDialog openFileDialog = new OpenFileDialog())
+            {
+                openFileDialog.Filter = "Image files|*.png;*.jpg;*.jpeg;*.bmp";
+                if (openFileDialog.ShowDialog() != DialogResult.OK)
+                    return;
+
+                byte[] inputBytes = File.ReadAllBytes(openFileDialog.FileName);
+                await RunButtonTaskAsync(sender as Button, "AI đang xóa nền...", async () =>
+                {
+                    byte[] resultBytes = await RemoveBgClient.RemoveBackgroundAsync(inputBytes);
+                    if (resultBytes == null || resultBytes.Length == 0)
+                        throw new InvalidOperationException("remove.bg không trả về ảnh.");
+
+                    if (pendingImportImage != null)
+                        pendingImportImage.Dispose();
+
+                    pendingImportImage = CreateImageFromBytes(resultBytes);
+                    isStickyNoteMode = false;
+                    isPlacingSticker = false;
+                    ToastForm.ShowToast(this, "Kéo thả trên canvas để đặt ảnh đã xóa nền");
+                });
+            }
+        }
+
+        private async Task RunButtonTaskAsync(Button button, string busyText, Func<Task> action)
+        {
+            string oldText = button?.Text;
+            try
+            {
+                if (button != null)
+                {
+                    button.Enabled = false;
+                    button.Text = busyText;
+                }
+                Cursor = Cursors.WaitCursor;
+                await action();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Không thể xử lý AI: " + ex.Message, "AI");
+            }
+            finally
+            {
+                Cursor = Cursors.Default;
+                if (button != null)
+                {
+                    button.Text = oldText;
+                    button.Enabled = true;
+                }
+            }
+        }
+
+        private string ShowPromptDialog(string title, string labelText)
+        {
+            using (Form dialog = new Form())
+            using (Label label = new Label())
+            using (TextBox textBox = new TextBox())
+            using (Button okButton = new Button())
+            using (Button cancelButton = new Button())
+            {
+                dialog.Text = title;
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dialog.MinimizeBox = false;
+                dialog.MaximizeBox = false;
+                dialog.ClientSize = new Size(420, 145);
+
+                label.Text = labelText;
+                label.Location = new Point(12, 12);
+                label.Size = new Size(396, 22);
+
+                textBox.Location = new Point(12, 40);
+                textBox.Size = new Size(396, 24);
+                textBox.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+
+                okButton.Text = "Tạo ảnh";
+                okButton.DialogResult = DialogResult.OK;
+                okButton.Location = new Point(232, 94);
+                okButton.Size = new Size(84, 30);
+
+                cancelButton.Text = "Hủy";
+                cancelButton.DialogResult = DialogResult.Cancel;
+                cancelButton.Location = new Point(324, 94);
+                cancelButton.Size = new Size(84, 30);
+
+                dialog.Controls.AddRange(new Control[] { label, textBox, okButton, cancelButton });
+                dialog.AcceptButton = okButton;
+                dialog.CancelButton = cancelButton;
+
+                return dialog.ShowDialog(this) == DialogResult.OK ? textBox.Text.Trim() : null;
+            }
+        }
+
+        private Image CreateImageFromBytes(byte[] bytes)
+        {
+            using (MemoryStream ms = new MemoryStream(bytes))
+            using (Image image = Image.FromStream(ms))
+            {
+                return new Bitmap(image);
+            }
+        }
+
+        private Rectangle BuildCenteredImageTarget(Size imageSize)
+        {
+            Size canvasSize = canvasManager.CanvasSize;
+            if (canvasSize.Width <= 0 || canvasSize.Height <= 0)
+                return new Rectangle(0, 0, Math.Max(50, imageSize.Width), Math.Max(50, imageSize.Height));
+
+            float scale = Math.Min(1f, Math.Min(canvasSize.Width / (float)Math.Max(1, imageSize.Width), canvasSize.Height / (float)Math.Max(1, imageSize.Height)));
+            int width = Math.Max(50, (int)(imageSize.Width * scale));
+            int height = Math.Max(50, (int)(imageSize.Height * scale));
+            int x = Math.Max(0, (canvasSize.Width - width) / 2);
+            int y = Math.Max(0, (canvasSize.Height - height) / 2);
+            return new Rectangle(x, y, width, height);
+        }
+
+        private void ImportImageAndBroadcast(Image image, Rectangle target)
+        {
+            canvasManager.ImportImage(image, target);
+
+            using (MemoryStream ms = new MemoryStream())
+            {
+                image.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                _network?.Send(CommandType.IMPORT_IMAGE, new ImportImagePayload
+                {
+                    ActionID = Guid.NewGuid().ToString(),
+                    Username = _network?.CurrentUsername,
+                    X = target.X,
+                    Y = target.Y,
+                    Width = target.Width,
+                    Height = target.Height,
+                    ImageData = Convert.ToBase64String(ms.ToArray()),
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                });
+            }
+
+            canvas.Invalidate();
+        }
+
         private void SendChatMessage()
         {
             string message = txtChatInput.Text?.Trim();
             if (string.IsNullOrWhiteSpace(message)) return;
 
-            _network?.SendChat(message);
+            long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var payload = new ChatPayload
+            {
+                Username = _network.CurrentUsername,
+                Message = message,
+                Timestamp = timestamp
+            };
+            RememberLocalChat(payload);
+            AppendChatMessage(payload);
+            _network?.Send(CommandType.CHAT, payload);
+            _udpManager?.SendChat(payload);
             txtChatInput.Clear();
+        }
+
+        private void SaveCurrentCanvasToGallery()
+        {
+            try
+            {
+                string filename = $"canvas_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+                string imageData = canvasManager.ExportPngBase64();
+                string thumbnailData = canvasManager.ExportPngBase64(240, 160);
+                _network?.SendSaveGallery(filename, imageData, thumbnailData);
+                ToastForm.ShowToast(this, "Đang lưu vào Gallery...");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Không thể lưu Gallery: " + ex.Message);
+            }
+        }
+
+        private bool EnsureCanDraw()
+        {
+            if (canvasManager == null || canvasManager.IsDrawingEnabled)
+                return true;
+
+            ToastForm.ShowToast(this, "Chưa tới lượt vẽ của bạn");
+            return false;
+        }
+
+        private string BuildChatKey(ChatPayload payload)
+        {
+            if (payload == null) return string.Empty;
+            return $"{payload.Username}|{payload.Timestamp}|{payload.Message}";
+        }
+
+        private void RememberLocalChat(ChatPayload payload)
+        {
+            string key = BuildChatKey(payload);
+            if (string.IsNullOrEmpty(key)) return;
+            locallyShownChat.Add(key);
+            locallyShownChatOrder.Enqueue(key);
+            while (locallyShownChatOrder.Count > 50)
+                locallyShownChat.Remove(locallyShownChatOrder.Dequeue());
+        }
+
+        private void AppendChatMessage(ChatPayload payload)
+        {
+            if (payload == null || lstChat == null)
+                return;
+
+            string key = BuildChatKey(payload);
+            if (!string.IsNullOrEmpty(key) && !displayedChat.Add(key))
+                return;
+            if (!string.IsNullOrEmpty(key))
+            {
+                displayedChatOrder.Enqueue(key);
+                while (displayedChatOrder.Count > 120)
+                    displayedChat.Remove(displayedChatOrder.Dequeue());
+            }
+
+            long ts = payload.Timestamp > 0 ? payload.Timestamp : DateTimeOffset.Now.ToUnixTimeMilliseconds();
+            DateTimeOffset time = DateTimeOffset.FromUnixTimeMilliseconds(ts).ToLocalTime();
+            lstChat.Items.Add($"[{time:HH:mm}] {payload.Username}: {payload.Message}");
+            lstChat.TopIndex = lstChat.Items.Count - 1;
         }
 
         private void AppendLog(string message)
@@ -776,8 +1074,11 @@ namespace DrawingClient.Forms
                 return;
             UIInvoke(() =>
             {
-                lstChat.Items.Add($"[{DateTime.Now:HH:mm}] {payload.Username}: {payload.Message}");
-                lstChat.TopIndex = lstChat.Items.Count - 1;
+                string key = BuildChatKey(payload);
+                if (!string.IsNullOrEmpty(key) && locallyShownChat.Remove(key))
+                    return;
+
+                AppendChatMessage(payload);
             });
         }
 
@@ -842,6 +1143,36 @@ namespace DrawingClient.Forms
                 }
                 AppendLog($"Follow: {payload.FollowerUsername} -> {payload.TargetUsername} ({payload.IsFollowing})");
             });
+        }
+
+        private void NetworkEvents_OnTurnBasedReceived(TurnBasedPayload payload)
+        {
+            if (payload == null)
+                return;
+
+            UIInvoke(() => ApplyTurnBasedState(payload));
+        }
+
+        private void ApplyTurnBasedState(TurnBasedPayload payload)
+        {
+            bool isMyTurn = !payload.IsEnabled ||
+                string.Equals(payload.ActiveUser, _network.CurrentUsername, StringComparison.OrdinalIgnoreCase);
+
+            canvasManager.IsDrawingEnabled = isMyTurn;
+            turnPanel.SetState(payload.IsEnabled, payload.ActiveUser);
+            AppendLog(payload.IsEnabled
+                ? $"Vẽ theo lượt: bật, lượt của {payload.ActiveUser}"
+                : "Vẽ theo lượt: tắt");
+            ToastForm.ShowToast(this, payload.IsEnabled
+                ? (isMyTurn ? "Bạn đang có quyền vẽ" : $"Đang chờ lượt của {payload.ActiveUser}")
+                : "Đã tắt vẽ theo lượt");
+        }
+
+        private void NetworkEvents_OnSaveGalleryResponse(SaveGalleryResponse payload)
+        {
+            if (payload == null)
+                return;
+            UIInvoke(() => ToastForm.ShowToast(this, payload.Message ?? (payload.IsSuccess ? "Đã lưu Gallery" : "Lỗi lưu Gallery")));
         }
 
         private void NetworkEvents_OnGifExportProgress(GifExportProgressPayload payload)

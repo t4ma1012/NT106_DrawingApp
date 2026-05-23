@@ -30,6 +30,8 @@ namespace DrawingServer.Services
             public int CanvasHeight { get; set; } = 720;
             public DateTime CreatedTime { get; set; }
             public bool IsActive { get; set; } = true;
+            public bool IsTurnBasedEnabled { get; set; }
+            public string ActiveDrawingUser { get; set; } = "";
         }
 
         public static async Task<(bool Success, string RoomCode, string Message)> CreateRoomAsync(string ownerUsername, int canvasWidth = 1280, int canvasHeight = 720)

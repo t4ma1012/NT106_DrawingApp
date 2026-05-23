@@ -134,6 +134,14 @@ namespace DrawingServer.Network
                             var joinData = PacketHelper.GetPayload<JoinRoomPayload>(packet);
                             if (joinData != null)
                             {
+                                if (!string.IsNullOrEmpty(session.RoomCode) &&
+                                    !string.Equals(session.RoomCode, joinData.RoomCode, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    try { RoomService.RemoveMemberFromRoom(session.RoomCode, session.Username ?? "unknown"); } catch { }
+                                    session.RoomCode = "";
+                                    session.UdpEndPoint = null;
+                                }
+
                                 bool exists = await DbManager.CheckRoomExistsAsync(joinData.RoomCode);
                                 await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.JOIN_ROOM_RESPONSE,
                                     new JoinRoomResponse { IsSuccess = exists, RoomCode = joinData.RoomCode, Message = exists ? "OK" : "Lỗi" }));
@@ -160,6 +168,18 @@ namespace DrawingServer.Network
                                         var members = RoomService.GetRoomMembersInfo(joinData.RoomCode);
                                         await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.ROOM_MEMBERS,
                                             new RoomMembersPayload { RoomCode = joinData.RoomCode, Members = members }));
+
+                                        var roomState = RoomService.GetRoomState(joinData.RoomCode);
+                                        if (roomState != null && roomState.IsTurnBasedEnabled)
+                                        {
+                                            await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.SET_TURNBASED,
+                                                new TurnBasedPayload
+                                                {
+                                                    RoomCode = joinData.RoomCode,
+                                                    IsEnabled = true,
+                                                    ActiveUser = roomState.ActiveDrawingUser
+                                                }));
+                                        }
                                             
                                         // Broadcast USER_JOIN cho các client khác trong phòng
                                         await BroadcastToRoomAsync(joinData.RoomCode, PacketHelper.Create(CommandType.USER_JOIN, 
@@ -186,11 +206,14 @@ namespace DrawingServer.Network
                         case CommandType.LEAVE_ROOM:
                             if (!string.IsNullOrEmpty(session.RoomCode))
                             {
+                                string leavingRoom = session.RoomCode;
                                 try { RoomService.RemoveMemberFromRoom(session.RoomCode, session.Username ?? "unknown"); } catch { }
                                 await BroadcastToRoomAsync(session.RoomCode,
                                     PacketHelper.Create(CommandType.USER_LEAVE, new UserLeavePayload { Username = session.Username ?? "unknown" }),
                                     excludeClientId: clientId);
                                 session.RoomCode = "";
+                                session.UdpEndPoint = null;
+                                Logger.Info("TCP", $"[LEAVE] '{session.Username}' rời phòng {leavingRoom}");
                             }
                             break;
 
@@ -214,13 +237,17 @@ namespace DrawingServer.Network
                         case CommandType.STICKER:
                             if (!string.IsNullOrEmpty(session.RoomCode))
                             {
+                                if (IsTurnBlocked(session)) break;
+
                                 // ✅ FIX: Lưu DB với ToolType="Sticker" để client biết cách replay khi reconnect
                                 try
                                 {
                                     string stickerJson = Encoding.UTF8.GetString(packet.Payload);
                                     var stickerObj = Newtonsoft.Json.Linq.JObject.Parse(stickerJson);
                                     stickerObj["ToolType"] = "Sticker";
-                                    await DbManager.SaveStrokeAsync(session.RoomCode, Guid.NewGuid().ToString(), stickerObj.ToString(), session.Username ?? "");
+                                    string actionId = stickerObj["ActionID"]?.ToString();
+                                    actionId = string.IsNullOrWhiteSpace(actionId) ? Guid.NewGuid().ToString() : actionId;
+                                    await DbManager.SaveStrokeAsync(session.RoomCode, actionId, stickerObj.ToString(), session.Username ?? "");
                                 }
                                 catch { }
 
@@ -238,9 +265,30 @@ namespace DrawingServer.Network
                         case CommandType.SET_TURNBASED:
                             if (!string.IsNullOrEmpty(session.RoomCode))
                             {
-                                // Broadcast cho TẤT CẢ kể cả người gửi để UI đồng bộ
+                                if ((packet.Cmd == CommandType.UNDO || packet.Cmd == CommandType.REDO) && IsTurnBlocked(session))
+                                    break;
+
+                                if (packet.Cmd == CommandType.SET_TURNBASED)
+                                {
+                                    var turnData = PacketHelper.GetPayload<TurnBasedPayload>(packet) ?? new TurnBasedPayload();
+                                    var roomState = RoomService.GetRoomState(session.RoomCode);
+                                    if (roomState != null)
+                                    {
+                                        roomState.IsTurnBasedEnabled = turnData.IsEnabled;
+                                        roomState.ActiveDrawingUser = turnData.IsEnabled ? (session.Username ?? "") : "";
+                                    }
+
+                                    packet = PacketHelper.Create(CommandType.SET_TURNBASED, new TurnBasedPayload
+                                    {
+                                        RoomCode = session.RoomCode,
+                                        Username = session.Username ?? "",
+                                        IsEnabled = turnData.IsEnabled,
+                                        ActiveUser = turnData.IsEnabled ? (session.Username ?? "") : ""
+                                    });
+                                    Logger.Info("TCP", $"[TURN_BASED] {(turnData.IsEnabled ? "ON" : "OFF")} active='{session.Username}' phòng {session.RoomCode}");
+                                }
+
                                 await BroadcastToRoomAsync(session.RoomCode, packet);
-                                Logger.Info("TCP", $"[TURN_BASED] Broadcast từ '{session.Username}' phòng {session.RoomCode}");
                             }
                             break;
 
@@ -252,6 +300,8 @@ namespace DrawingServer.Network
                         case CommandType.CLEAR_ALL:
                             if (!string.IsNullOrEmpty(session.RoomCode))
                             {
+                                if (IsTurnBlocked(session)) break;
+
                                 // Xóa lịch sử vẽ trong DB để người join sau không nhận history cũ
                                 try { await DbManager.ClearRoomHistoryAsync(session.RoomCode); } catch { }
                                 // Broadcast cho tất cả NGOẠI TRỪ người gửi (họ đã clear local rồi)
@@ -272,13 +322,17 @@ namespace DrawingServer.Network
                         case CommandType.SET_BACKGROUND:
                             if (!string.IsNullOrEmpty(session.RoomCode))
                             {
+                                if (IsTurnBlocked(session)) break;
+
                                 // ✅ FIX: Lưu màu nền với ToolType="SetBackground" — khi reconnect canvas sẽ đúng màu nền
                                 try
                                 {
                                     string bgJson = Encoding.UTF8.GetString(packet.Payload);
                                     var bgObj = Newtonsoft.Json.Linq.JObject.Parse(bgJson);
                                     bgObj["ToolType"] = "SetBackground";
-                                    await DbManager.SaveStrokeAsync(session.RoomCode, Guid.NewGuid().ToString(), bgObj.ToString(), session.Username ?? "");
+                                    string actionId = bgObj["ActionID"]?.ToString();
+                                    actionId = string.IsNullOrWhiteSpace(actionId) ? Guid.NewGuid().ToString() : actionId;
+                                    await DbManager.SaveStrokeAsync(session.RoomCode, actionId, bgObj.ToString(), session.Username ?? "");
                                 }
                                 catch { }
                                 await BroadcastToRoomAsync(session.RoomCode, packet, excludeClientId: clientId);
@@ -288,6 +342,8 @@ namespace DrawingServer.Network
                         case CommandType.IMPORT_IMAGE:
                             if (!string.IsNullOrEmpty(session.RoomCode))
                             {
+                                if (IsTurnBlocked(session)) break;
+
                                 // ✅ FIX: Lưu ảnh import với ToolType="ImportImage" — khi reconnect ảnh vẫn còn trên canvas
                                 try
                                 {
@@ -642,6 +698,21 @@ namespace DrawingServer.Network
                 total += read;
             }
             return true;
+        }
+
+        private bool IsTurnBlocked(ClientSession session)
+        {
+            if (session == null || string.IsNullOrEmpty(session.RoomCode))
+                return false;
+
+            var roomState = RoomService.GetRoomState(session.RoomCode);
+            if (roomState == null || !roomState.IsTurnBasedEnabled)
+                return false;
+
+            bool blocked = !string.Equals(roomState.ActiveDrawingUser, session.Username, StringComparison.OrdinalIgnoreCase);
+            if (blocked)
+                Logger.Info("TCP", $"[TURN_BASED] Chặn thao tác từ '{session.Username}', lượt hiện tại='{roomState.ActiveDrawingUser}'");
+            return blocked;
         }
     }
 }

@@ -23,6 +23,7 @@ namespace DrawingClient.Drawing
         private readonly Dictionary<string, Point> remoteCursors = new Dictionary<string, Point>();
         private readonly object cursorLock = new object();
         private readonly List<StickerPayload> stickers = new List<StickerPayload>();
+        private readonly HashSet<string> stickerIds = new HashSet<string>();
         private readonly object stickerLock = new object();
 
         public ToolType CurrentTool { get; set; } = ToolType.Pen;
@@ -30,6 +31,7 @@ namespace DrawingClient.Drawing
         public Color BackgroundColor { get; set; } = Color.White;
         public int PenWidth { get; set; } = 2;
         public float ZoomFactor { get; set; } = 1.0f;
+        public Size CanvasSize => drawingSurface?.Size ?? Size.Empty;
 
         // ✅ Turn-based: false = bị chặn vẽ
         public bool IsDrawingEnabled { get; set; } = true;
@@ -156,13 +158,22 @@ namespace DrawingClient.Drawing
         public void AddSticker(StickerPayload payload)
         {
             if (payload == null) return;
-            lock (stickerLock) { stickers.Add(payload); }
+            lock (stickerLock)
+            {
+                if (!string.IsNullOrWhiteSpace(payload.ActionID) && !stickerIds.Add(payload.ActionID))
+                    return;
+                stickers.Add(payload);
+            }
             canvas.Invalidate();
         }
 
         public void ClearStickers()
         {
-            lock (stickerLock) { stickers.Clear(); }
+            lock (stickerLock)
+            {
+                stickers.Clear();
+                stickerIds.Clear();
+            }
             canvas.Invalidate();
         }
 
@@ -232,18 +243,54 @@ namespace DrawingClient.Drawing
         {
             if (string.IsNullOrWhiteSpace(filePath) || drawingSurface == null) return;
 
-            // Tự tạo một tấm ảnh mới tinh
-            using (Bitmap exportBmp = new Bitmap(drawingSurface.Width, drawingSurface.Height))
+            using (Bitmap exportBmp = RenderToBitmap())
+                exportBmp.Save(filePath);
+        }
+
+        public string ExportPngBase64(int maxWidth = 0, int maxHeight = 0)
+        {
+            using (Bitmap exportBmp = RenderToBitmap())
+            using (Bitmap output = ResizeForExport(exportBmp, maxWidth, maxHeight))
+            using (MemoryStream ms = new MemoryStream())
+            {
+                output.Save(ms, ImageFormat.Png);
+                return Convert.ToBase64String(ms.ToArray());
+            }
+        }
+
+        private Bitmap RenderToBitmap()
+        {
+            Bitmap exportBmp = new Bitmap(drawingSurface.Width, drawingSurface.Height);
             using (Graphics g = Graphics.FromImage(exportBmp))
             {
-                // Sơn màu nền hiện tại lên tấm ảnh mới
+                g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.Clear(BackgroundColor);
-                // Đặt các nét vẽ (vốn trong suốt) đè lên trên màu nền
                 g.DrawImage(drawingSurface, 0, 0);
-
-                // Lưu thành quả
-                exportBmp.Save(filePath);
+                lock (stickerLock)
+                {
+                    foreach (var sticker in stickers)
+                        DrawSticker(g, sticker);
+                }
             }
+            return exportBmp;
+        }
+
+        private static Bitmap ResizeForExport(Bitmap source, int maxWidth, int maxHeight)
+        {
+            if (maxWidth <= 0 || maxHeight <= 0 || (source.Width <= maxWidth && source.Height <= maxHeight))
+                return new Bitmap(source);
+
+            float scale = Math.Min(maxWidth / (float)source.Width, maxHeight / (float)source.Height);
+            int width = Math.Max(1, (int)(source.Width * scale));
+            int height = Math.Max(1, (int)(source.Height * scale));
+            Bitmap resized = new Bitmap(width, height);
+            using (Graphics g = Graphics.FromImage(resized))
+            {
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.DrawImage(source, new Rectangle(0, 0, width, height));
+            }
+            return resized;
         }
 
         public void ApplyRemoteDraw(DrawPayload payload)
@@ -401,6 +448,8 @@ namespace DrawingClient.Drawing
 
         private void DrawTextOnCanvas(string text, Point location, Color color)
         {
+            if (!IsDrawingEnabled) return;
+
             try { UndoHistory?.Push(drawingSurface); } catch { }
             using (Graphics g = Graphics.FromImage(drawingSurface))
             using (Font font = new Font("Arial", 14))

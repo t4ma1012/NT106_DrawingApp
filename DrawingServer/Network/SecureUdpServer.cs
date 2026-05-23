@@ -11,6 +11,7 @@ using SharedLib.Packets;
 using SharedLib.Security;
 using SharedLib.Logging;
 using Newtonsoft.Json.Linq;
+using DrawingServer.Services;
 
 namespace DrawingServer.Network
 {
@@ -47,7 +48,7 @@ namespace DrawingServer.Network
 
                 string jsonPayload = PacketHelper.GetRawJson(packet);
                 JObject data = JObject.Parse(jsonPayload);
-                string username = data["Username"]?.ToString() ?? "";
+                string username = data["Username"]?.ToString() ?? data["ActiveUser"]?.ToString() ?? "";
 
                 // Log mỗi gói nhận được (giúp debug)
                 Logger.Info("UDP", $"Nhận [{packet.Cmd}] từ {result.RemoteEndPoint} | Username='{username}'");
@@ -97,6 +98,35 @@ namespace DrawingServer.Network
                 }
 
                 Logger.Info("UDP", $"Broadcast [{packet.Cmd}] từ '{username}' trong phòng '{roomCode}'");
+
+                if (packet.Cmd == CommandType.SET_TURNBASED || packet.Cmd == CommandType.TURN_CHANGE)
+                {
+                    var roomState = RoomService.GetRoomState(roomCode);
+                    if (roomState != null)
+                    {
+                        bool isEnabled = data["IsEnabled"]?.ToObject<bool>() ?? false;
+                        string activeUser = isEnabled ? (data["ActiveUser"]?.ToString() ?? username) : "";
+                        roomState.IsTurnBasedEnabled = isEnabled;
+                        roomState.ActiveDrawingUser = activeUser;
+                        data["RoomCode"] = roomCode;
+                        data["Username"] = username;
+                        data["ActiveUser"] = activeUser;
+                        packet.Payload = System.Text.Encoding.UTF8.GetBytes(data.ToString());
+                        Logger.Info("UDP", $"[TURN_BASED] {(isEnabled ? "ON" : "OFF")} active='{activeUser}' phòng {roomCode}");
+                    }
+                }
+
+                if (IsDrawingCommand(packet.Cmd))
+                {
+                    var roomState = RoomService.GetRoomState(roomCode);
+                    if (roomState != null &&
+                        roomState.IsTurnBasedEnabled &&
+                        !string.Equals(roomState.ActiveDrawingUser, username, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Logger.Info("UDP", $"[TURN_BASED] Chặn [{packet.Cmd}] từ '{username}', lượt hiện tại='{roomState.ActiveDrawingUser}'");
+                        return;
+                    }
+                }
 
                 // Bước 5: Xử lý theo loại lệnh
                 // ✅ FIX: Lưu DB cho tất cả lệnh vẽ (FLOOD_FILL, TEXT, SPRAY)
@@ -190,6 +220,18 @@ namespace DrawingServer.Network
             }
 
             return count;
+        }
+
+        private static bool IsDrawingCommand(CommandType cmd)
+        {
+            return cmd == CommandType.DRAW
+                || cmd == CommandType.FLOOD_FILL
+                || cmd == CommandType.TEXT
+                || cmd == CommandType.SPRAY
+                || cmd == CommandType.SET_BACKGROUND
+                || cmd == CommandType.STICKER
+                || cmd == CommandType.IMPORT_IMAGE
+                || cmd == CommandType.PIXEL_ART_DRAW;
         }
     }
 }

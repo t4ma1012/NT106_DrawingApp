@@ -17,7 +17,7 @@ namespace SharedLib.AI
         // ── Stability AI ────────────────────────────────────────
         // Đăng ký tại: https://platform.stability.ai → API Keys
         // Free tier: 25 credits/ngày (đủ để demo)
-        public static string StabilityApiKey { get; set; } = "YOUR_STABILITY_AI_KEY_HERE";
+        public static string StabilityApiKey { get; set; } = "sk-VEbx1gMW4zKOPXd5cRZkJ1ksSbmCcVoxtJy2NYuUE4uNY0fV";
 
         // Endpoint Text-to-Image
         public const string StabilityTextToImageUrl =
@@ -30,7 +30,7 @@ namespace SharedLib.AI
         // ── Remove.bg ───────────────────────────────────────────
         // Đăng ký tại: https://www.remove.bg → Dashboard → API Key
         // Free tier: 50 ảnh/tháng
-        public static string RemoveBgApiKey { get; set; } = "YOUR_REMOVE_BG_KEY_HERE";
+        public static string RemoveBgApiKey { get; set; } = "DgWerUMTgjq179PqsrNn9nWy";
 
         public const string RemoveBgUrl = "https://api.remove.bg/v1.0/removebg";
 

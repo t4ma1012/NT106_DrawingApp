@@ -144,6 +144,7 @@ namespace SharedLib.Payloads
     public class TurnBasedPayload
     {
         public string RoomCode { get; set; }
+        public string Username { get; set; }
         public bool IsEnabled { get; set; }
         public string ActiveUser { get; set; }
     }

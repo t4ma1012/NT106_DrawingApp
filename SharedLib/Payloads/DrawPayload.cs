@@ -44,7 +44,10 @@ namespace SharedLib.Payloads
 
     public class SetBackgroundPayload
     {
+        public string ActionID { get; set; }
+        public string RoomCode { get; set; }
         public string Username { get; set; }
         public int ColorARGB { get; set; }
+        public long Timestamp { get; set; }
     }
 }

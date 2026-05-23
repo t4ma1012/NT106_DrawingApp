@@ -68,6 +68,10 @@ namespace DrawingClient.Network
 
         public void SendDraw(DrawPayload p) => SendPacket(CommandType.DRAW, p);
         public void SendFloodFill(FloodFillPayload p) => SendPacket(CommandType.FLOOD_FILL, p);
+        public void SendSetBackground(SetBackgroundPayload p) => SendPacket(CommandType.SET_BACKGROUND, p);
+        public void SendSticker(StickerPayload p) => SendPacket(CommandType.STICKER, p);
+        public void SendChat(ChatPayload p) => SendPacket(CommandType.CHAT, p);
+        public void SendTurnBased(TurnBasedPayload p) => SendPacket(CommandType.SET_TURNBASED, p);
         public void SendCursor(CursorPayload p) => SendPacket(CommandType.CURSOR, p);
         public void SendLaser(LaserPayload p) => SendPacket(CommandType.LASER, p);
         public void SendReaction(ReactionPayload p) => SendPacket(CommandType.REACTION, p);
@@ -106,6 +110,23 @@ namespace DrawingClient.Network
                     case CommandType.FLOOD_FILL:
                         NetworkEvents.RaiseFloodFillReceived(
                             JsonConvert.DeserializeObject<FloodFillPayload>(json));
+                        break;
+                    case CommandType.SET_BACKGROUND:
+                        NetworkEvents.RaiseSetBackgroundReceived(
+                            JsonConvert.DeserializeObject<SetBackgroundPayload>(json));
+                        break;
+                    case CommandType.STICKER:
+                        NetworkEvents.RaiseStickerReceived(
+                            JsonConvert.DeserializeObject<StickerPayload>(json));
+                        break;
+                    case CommandType.CHAT:
+                        NetworkEvents.RaiseChatReceived(
+                            JsonConvert.DeserializeObject<ChatPayload>(json));
+                        break;
+                    case CommandType.SET_TURNBASED:
+                    case CommandType.TURN_CHANGE:
+                        NetworkEvents.RaiseTurnBasedReceived(
+                            JsonConvert.DeserializeObject<TurnBasedPayload>(json));
                         break;
                     case CommandType.CURSOR:
                         NetworkEvents.RaiseCursorReceived(

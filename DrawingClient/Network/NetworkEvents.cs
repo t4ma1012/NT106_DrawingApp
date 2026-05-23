@@ -55,6 +55,7 @@ namespace DrawingClient.Network
 
         // ── GALLERY ──────────────────────────────────────────────
         public static event Action<GalleryResponsePayload> OnGalleryReceived;
+        public static event Action<SaveGalleryResponse> OnSaveGalleryResponse;
         public static event Action<PublicGalleryLinkPayload> OnPublicLinkReceived;
 
         // ── AI FEATURES (Tuần 5-6) ──────────────────────────────
@@ -111,6 +112,7 @@ namespace DrawingClient.Network
         public static void RaiseClaimAreaReceived(ClaimAreaPayload p) => OnClaimAreaReceived?.Invoke(p);
         public static void RaiseReleaseAreaReceived(ReleaseAreaPayload p) => OnReleaseAreaReceived?.Invoke(p);
         public static void RaiseGalleryReceived(GalleryResponsePayload p) => OnGalleryReceived?.Invoke(p);
+        public static void RaiseSaveGalleryResponse(SaveGalleryResponse p) => OnSaveGalleryResponse?.Invoke(p);
         public static void RaisePublicLinkReceived(PublicGalleryLinkPayload p) => OnPublicLinkReceived?.Invoke(p);
         public static void RaiseAiTextToImageResult(AiTextToImageResultPayload p) => OnAiTextToImageResult?.Invoke(p);
         public static void RaiseAiBgRemovedResult(AiBgRemovedPayload p) => OnAiBgRemovedResult?.Invoke(p);

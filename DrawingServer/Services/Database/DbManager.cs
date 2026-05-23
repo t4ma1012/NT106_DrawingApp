@@ -209,6 +209,24 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
         /// Lưu ảnh vào Gallery. Trả về (id, publicToken) để tạo public link ngay.
         /// public_token được PostgreSQL tự sinh bằng gen_random_uuid() trong database_setup.sql.
         /// </summary>
+        private static async Task EnsureGalleryTableAsync(NpgsqlConnection conn)
+        {
+            using var cmd = new NpgsqlCommand(
+                @"CREATE TABLE IF NOT EXISTS Gallery (
+                    id SERIAL PRIMARY KEY,
+                    room_id INT REFERENCES Rooms(id) ON DELETE CASCADE,
+                    filename VARCHAR(255) NOT NULL,
+                    image_data TEXT NOT NULL,
+                    created_by VARCHAR(50),
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    public_token VARCHAR(100) UNIQUE
+                );
+                CREATE INDEX IF NOT EXISTS idx_gallery_room_id ON Gallery(room_id);
+                CREATE INDEX IF NOT EXISTS idx_gallery_public_token ON Gallery(public_token);",
+                conn);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
         public static async Task<(bool IsSuccess, int Id, string PublicToken)> SaveGalleryItemAsync(
             string roomCode, string filename, string imageData, string createdBy)
         {
@@ -216,22 +234,26 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
             {
                 using var conn = new NpgsqlConnection(connString);
                 await conn.OpenAsync();
+                await EnsureGalleryTableAsync(conn);
 
                 using var cmdRoom = new NpgsqlCommand("SELECT id FROM Rooms WHERE room_code = @c", conn);
                 cmdRoom.Parameters.AddWithValue("c", roomCode);
-                var roomId = await cmdRoom.ExecuteScalarAsync() as int?;
-                if (roomId == null) return (false, 0, "");
+                var roomIdObj = await cmdRoom.ExecuteScalarAsync();
+                if (roomIdObj == null || roomIdObj == DBNull.Value) return (false, 0, "");
+                int roomId = Convert.ToInt32(roomIdObj);
+                string tokenValue = Guid.NewGuid().ToString("N");
 
                 // RETURNING id, public_token để lấy luôn sau khi insert
                 using var cmdInsert = new NpgsqlCommand(
-                    @"INSERT INTO Gallery (room_id, filename, image_data, created_by, created_at)
-                      VALUES (@r, @f, @i, @cb, NOW())
+                    @"INSERT INTO Gallery (room_id, filename, image_data, created_by, created_at, public_token)
+                      VALUES (@r, @f, @i, @cb, NOW(), @t)
                       RETURNING id, public_token",
                     conn);
                 cmdInsert.Parameters.AddWithValue("r",  roomId);
                 cmdInsert.Parameters.AddWithValue("f",  filename ?? "Untitled");
                 cmdInsert.Parameters.AddWithValue("i",  imageData ?? "");
                 cmdInsert.Parameters.AddWithValue("cb", createdBy);
+                cmdInsert.Parameters.AddWithValue("t",  tokenValue);
 
                 using var reader = await cmdInsert.ExecuteReaderAsync();
                 if (await reader.ReadAsync())
@@ -260,11 +282,13 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
             {
                 using var conn = new NpgsqlConnection(connString);
                 await conn.OpenAsync();
+                await EnsureGalleryTableAsync(conn);
 
                 using var cmdRoom = new NpgsqlCommand("SELECT id FROM Rooms WHERE room_code = @c", conn);
                 cmdRoom.Parameters.AddWithValue("c", roomCode);
-                var roomId = await cmdRoom.ExecuteScalarAsync() as int?;
-                if (roomId == null) return items;
+                var roomIdObj = await cmdRoom.ExecuteScalarAsync();
+                if (roomIdObj == null || roomIdObj == DBNull.Value) return items;
+                int roomId = Convert.ToInt32(roomIdObj);
 
                 using var cmd = new NpgsqlCommand(
                     @"SELECT id, filename, image_data, created_by, created_at, public_token

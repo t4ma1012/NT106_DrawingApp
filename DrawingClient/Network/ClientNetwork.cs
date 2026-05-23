@@ -29,6 +29,9 @@ namespace DrawingClient.Network
 
         public string CurrentUsername { get; private set; }
         public string CurrentRoomCode { get; private set; }
+        public string ServerIp { get; private set; } = "127.0.0.1";
+        public int ServerTcpPort { get; private set; } = 8888;
+        public int ServerUdpPort { get; private set; } = 8889;
         public bool IsConnected => _tcpClient?.Connected ?? false;
 
         // ── CONNECT / DISCONNECT ────────────────────────────────
@@ -37,8 +40,10 @@ namespace DrawingClient.Network
         {
             try
             {
+                ServerIp = string.IsNullOrWhiteSpace(ip) ? "127.0.0.1" : ip.Trim();
+                ServerTcpPort = port;
                 _tcpClient = new TcpClient();
-                _tcpClient.Connect(ip, port);
+                _tcpClient.Connect(ServerIp, port);
 
                 if (useSSL)
                 {
@@ -167,6 +172,8 @@ namespace DrawingClient.Network
         public void SendStickyNote(StickyNotePayload payload) => Send(CommandType.STICKY_NOTE, payload);
         public void SendFollowMode(string targetUsername, bool isFollowing) => Send(CommandType.FOLLOW_MODE, new FollowModePayload { FollowerUsername = CurrentUsername, TargetUsername = targetUsername, IsFollowing = isFollowing });
         public void SendExportGifRequest(int fpsFrames = 10, long startTimestamp = 0, long endTimestamp = 0) => Send(CommandType.EXPORT_GIF_REQUEST, new GifExportRequestPayload { RoomCode = CurrentRoomCode, FpsFrames = fpsFrames, Filename = $"drawing_{DateTime.Now:yyyyMMdd_HHmmss}.gif", StartTimestamp = startTimestamp, EndTimestamp = endTimestamp });
+        public void SendGetGallery() => Send(CommandType.GET_GALLERY, new GetGalleryPayload { RoomCode = CurrentRoomCode });
+        public void SendSaveGallery(string filename, string imageData, string thumbnailData) => Send(CommandType.SAVE_TO_GALLERY, new SaveGalleryPayload { RoomCode = CurrentRoomCode, Username = CurrentUsername, Filename = filename, ImageData = imageData, ThumbnailData = thumbnailData });
 
         // ── RECEIVE LOOP BỌC THÉP ───────────────────────────────
 
@@ -358,7 +365,14 @@ namespace DrawingClient.Network
                         NetworkEvents.RaiseFollowModeReceived(PacketHelper.GetPayload<FollowModePayload>(p));
                         break;
                     case CommandType.SET_TURNBASED:
+                    case CommandType.TURN_CHANGE:
                         NetworkEvents.RaiseTurnBasedReceived(PacketHelper.GetPayload<TurnBasedPayload>(p));
+                        break;
+                    case CommandType.SAVE_TO_GALLERY:
+                        NetworkEvents.RaiseSaveGalleryResponse(PacketHelper.GetPayload<SaveGalleryResponse>(p));
+                        break;
+                    case CommandType.GALLERY_RESPONSE:
+                        NetworkEvents.RaiseGalleryReceived(PacketHelper.GetPayload<GalleryResponsePayload>(p));
                         break;
                     case CommandType.IMPORT_IMAGE:
                         NetworkEvents.RaiseImportImageReceived(PacketHelper.GetPayload<ImportImagePayload>(p));
