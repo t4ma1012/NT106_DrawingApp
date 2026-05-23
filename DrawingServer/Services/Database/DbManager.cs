@@ -65,13 +65,22 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
                 using var conn = new NpgsqlConnection(connString);
                 await conn.OpenAsync();
 
+                // Lấy user_id thay vì cố gắng nhét chữ
+                using var cmdUserId = new NpgsqlCommand("SELECT id FROM Users WHERE username = @u", conn);
+                cmdUserId.Parameters.AddWithValue("u", username);
+                var userIdObj = await cmdUserId.ExecuteScalarAsync();
+
+                if (userIdObj == null) 
+                    return null; // Không tìm thấy user
+
+                int userId = Convert.ToInt32(userIdObj);
+
                 string roomCode = new Random().Next(100000, 999999).ToString();
 
-                // FIX: Đã đổi 'owner_id' thành 'created_by' và truyền thẳng username vào
-                // FIX: Bổ sung thêm lưu canvas_width và canvas_height luôn cho chuẩn
-                using var cmdRoom = new NpgsqlCommand("INSERT INTO rooms (room_code, created_by, canvas_width, canvas_height) VALUES (@c, @cb, @w, @h)", conn);
+                // Dùng owner_id như đúng thiết kế bảng Rooms của bạn
+                using var cmdRoom = new NpgsqlCommand("INSERT INTO rooms (room_code, owner_id, canvas_width, canvas_height) VALUES (@c, @oid, @w, @h)", conn);
                 cmdRoom.Parameters.AddWithValue("c", roomCode);
-                cmdRoom.Parameters.AddWithValue("cb", username);
+                cmdRoom.Parameters.AddWithValue("oid", userId);
                 cmdRoom.Parameters.AddWithValue("w", width);
                 cmdRoom.Parameters.AddWithValue("h", height);
                 await cmdRoom.ExecuteNonQueryAsync();
