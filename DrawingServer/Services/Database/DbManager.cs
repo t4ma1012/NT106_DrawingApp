@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Npgsql;
+using SharedLib.Config;
 using SharedLib.Logging; // Thư viện kết nối PostgreSQL
 
 namespace DrawingServer.Database // Đảm bảo đúng Namespace này để các file khác nhận diện được
@@ -9,7 +10,7 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
     public static class DbManager
     {
         // Nhớ kiểm tra lại mật khẩu Database của bạn (đang để mặc định là 123456)
-        private static readonly string connString = "Host=your-db-host;Port=5432;Database=drawingapp;Username=your_user;Password=your_password;";
+        private static string connString => EnvLoader.GetRequired("DATABASE_URL");
 
         private static string ComputeSha256Hash(string rawData)
         {
@@ -78,11 +79,18 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
                 string roomCode = new Random().Next(100000, 999999).ToString();
 
                 // Dùng owner_id như đúng thiết kế bảng Rooms của bạn
-                using var cmdRoom = new NpgsqlCommand("INSERT INTO rooms (room_code, owner_id, canvas_width, canvas_height) VALUES (@c, @oid, @w, @h)", conn);
+                string serverId = EnvLoader.Get("SERVER_ID", "server-1");
+                int maxMembers = Math.Max(1, EnvLoader.GetInt("MAX_ROOM_MEMBERS", 5));
+
+                using var cmdRoom = new NpgsqlCommand(
+                    @"INSERT INTO rooms (room_code, owner_id, canvas_width, canvas_height, owner_server_id, max_members)
+                      VALUES (@c, @oid, @w, @h, @sid, @max)", conn);
                 cmdRoom.Parameters.AddWithValue("c", roomCode);
                 cmdRoom.Parameters.AddWithValue("oid", userId);
                 cmdRoom.Parameters.AddWithValue("w", width);
                 cmdRoom.Parameters.AddWithValue("h", height);
+                cmdRoom.Parameters.AddWithValue("sid", serverId);
+                cmdRoom.Parameters.AddWithValue("max", maxMembers);
                 await cmdRoom.ExecuteNonQueryAsync();
 
                 return roomCode;
@@ -172,6 +180,58 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
                 SharedLib.Logging.Logger.Error("DB", $"[HISTORY ERROR] room={roomCode} err={ex.Message}");
             }
             return history;
+        }
+
+        public static async Task UpsertServerNodeAsync(
+            string serverId,
+            string serverName,
+            string host,
+            int tcpPort,
+            int udpPort,
+            int activeConnections,
+            int activeRooms,
+            int maxConnections,
+            bool isHealthy)
+        {
+            try
+            {
+                using var conn = new NpgsqlConnection(connString);
+                await conn.OpenAsync();
+
+                using var cmd = new NpgsqlCommand(
+                    @"INSERT INTO ServerNodes
+                        (server_id, server_name, host, tcp_port, udp_port, active_connections, active_rooms,
+                         max_connections, is_healthy, last_heartbeat)
+                      VALUES
+                        (@id, @name, @host, @tcp, @udp, @connections, @rooms, @max, @healthy, NOW())
+                      ON CONFLICT (server_id)
+                      DO UPDATE SET
+                        server_name = EXCLUDED.server_name,
+                        host = EXCLUDED.host,
+                        tcp_port = EXCLUDED.tcp_port,
+                        udp_port = EXCLUDED.udp_port,
+                        active_connections = EXCLUDED.active_connections,
+                        active_rooms = EXCLUDED.active_rooms,
+                        max_connections = EXCLUDED.max_connections,
+                        is_healthy = EXCLUDED.is_healthy,
+                        last_heartbeat = NOW()", conn);
+
+                cmd.Parameters.AddWithValue("id", serverId);
+                cmd.Parameters.AddWithValue("name", serverName);
+                cmd.Parameters.AddWithValue("host", host);
+                cmd.Parameters.AddWithValue("tcp", tcpPort);
+                cmd.Parameters.AddWithValue("udp", udpPort);
+                cmd.Parameters.AddWithValue("connections", activeConnections);
+                cmd.Parameters.AddWithValue("rooms", activeRooms);
+                cmd.Parameters.AddWithValue("max", maxConnections);
+                cmd.Parameters.AddWithValue("healthy", isHealthy);
+
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("DB", $"UpsertServerNodeAsync loi: {ex.Message}");
+            }
         }
 
         /// <summary>Xóa toàn bộ lịch sử vẽ của phòng (khi CLEAR_ALL).</summary>
@@ -414,8 +474,8 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
         }
 
 
-        /// <summary>Lưu kết quả AI vào bảng AiHistory</summary>
-        public static async Task<bool> SaveAiResultAsync(string roomCode, string aiType, string prompt, string imageData, string username)
+        /// <summary>Lưu kết quả AI vào bảng AiResults</summary>
+        public static async Task<bool> SaveAiResultAsync(string roomCode, string aiType, string prompt, string imageData, string username, string provider = "gemini", string model = "")
         {
             try
             {
@@ -425,17 +485,20 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
                 // Lấy room_id
                 using var cmdRoom = new NpgsqlCommand("SELECT id FROM Rooms WHERE room_code = @c", conn);
                 cmdRoom.Parameters.AddWithValue("c", roomCode);
-                var roomId = await cmdRoom.ExecuteScalarAsync() as int?;
-                if (roomId == null) return false;
+                var roomIdObj = await cmdRoom.ExecuteScalarAsync();
+                if (roomIdObj == null || roomIdObj == DBNull.Value) return false;
+                int roomId = Convert.ToInt32(roomIdObj);
 
                 using var cmdInsert = new NpgsqlCommand(
-                    @"INSERT INTO AiHistory (room_id, ai_type, prompt, image_data, created_by, created_at)
-                      VALUES (@r, @t, @p, @i, @u, NOW())", conn);
-                cmdInsert.Parameters.AddWithValue("r", roomId.Value);
+                    @"INSERT INTO AiResults (room_id, ai_type, prompt, image_data, created_by, username, provider, model, created_at)
+                      VALUES (@r, @t, @p, @i, @u, @u, @provider, @model, NOW())", conn);
+                cmdInsert.Parameters.AddWithValue("r", roomId);
                 cmdInsert.Parameters.AddWithValue("t", aiType);
                 cmdInsert.Parameters.AddWithValue("p", prompt ?? "");
                 cmdInsert.Parameters.AddWithValue("i", imageData ?? "");
                 cmdInsert.Parameters.AddWithValue("u", username);
+                cmdInsert.Parameters.AddWithValue("provider", provider ?? "gemini");
+                cmdInsert.Parameters.AddWithValue("model", model ?? "");
                 await cmdInsert.ExecuteNonQueryAsync();
 
                 Logger.Info("DB", $"Đã lưu AI result [{aiType}] của {username} vào phòng {roomCode}");
@@ -459,13 +522,20 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
 
                 using var cmdRoom = new NpgsqlCommand("SELECT id FROM Rooms WHERE room_code = @c", conn);
                 cmdRoom.Parameters.AddWithValue("c", roomCode);
-                var roomId = await cmdRoom.ExecuteScalarAsync() as int?;
-                if (roomId == null) return items;
+                var roomIdObj = await cmdRoom.ExecuteScalarAsync();
+                if (roomIdObj == null || roomIdObj == DBNull.Value) return items;
+                int roomId = Convert.ToInt32(roomIdObj);
 
                 using var cmd = new NpgsqlCommand(
-                    @"SELECT ai_type, prompt, created_by, created_at FROM AiHistory
-                      WHERE room_id = @r ORDER BY created_at DESC LIMIT @l", conn);
-                cmd.Parameters.AddWithValue("r", roomId.Value);
+                    @"SELECT ai_type,
+                             prompt,
+                             COALESCE(created_by, username, '') AS created_by,
+                             created_at
+                      FROM AiResults
+                      WHERE room_id = @r
+                      ORDER BY created_at DESC
+                      LIMIT @l", conn);
+                cmd.Parameters.AddWithValue("r", roomId);
                 cmd.Parameters.AddWithValue("l", limit);
 
                 using var reader = await cmd.ExecuteReaderAsync();

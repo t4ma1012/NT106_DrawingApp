@@ -159,7 +159,16 @@ namespace NT106Tests
             // Test with different payload types
             var testCases = new[]
             {
-                (CommandType.DRAW, (object)new DrawPayload { X = 100, Y = 200, Color = -1 }),
+                (CommandType.DRAW, (object)new DrawPayload
+                {
+                    X1 = 100,
+                    Y1 = 200,
+                    X2 = 110,
+                    Y2 = 210,
+                    ColorARGB = -1,
+                    Thickness = 2,
+                    ToolType = "Pen"
+                }),
                 (CommandType.CHAT, (object)new ChatPayload { Username = "user1", Message = "hello" }),
                 (CommandType.UNDO, (object)new UndoPayload { ActionID = "guid123", Username = "user1" }),
             };

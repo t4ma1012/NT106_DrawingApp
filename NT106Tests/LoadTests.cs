@@ -34,8 +34,13 @@ namespace NT106Tests
             {
                 var payload = new DrawPayload
                 {
-                    X = i % 1280, Y = i % 720,
-                    Color = -16777216,
+                    X1 = i % 1280,
+                    Y1 = i % 720,
+                    X2 = (i + 1) % 1280,
+                    Y2 = (i + 1) % 720,
+                    ColorARGB = -16777216,
+                    Thickness = 2,
+                    ToolType = "Pen",
                     Username = "LoadTestUser",
                     ActionID = Guid.NewGuid().ToString()
                 };
@@ -58,7 +63,17 @@ namespace NT106Tests
         public void AesEncryptDecryptPerformance_500RoundTrips()
         {
             const int COUNT = 500;
-            var payload = new DrawPayload { X = 100, Y = 200, Color = -1, Username = "TestUser" };
+            var payload = new DrawPayload
+            {
+                X1 = 100,
+                Y1 = 200,
+                X2 = 110,
+                Y2 = 210,
+                ColorARGB = -1,
+                Thickness = 2,
+                ToolType = "Pen",
+                Username = "TestUser"
+            };
             var packet  = PacketHelper.Create(CommandType.DRAW, payload);
             byte[] raw  = packet.Serialize();
 

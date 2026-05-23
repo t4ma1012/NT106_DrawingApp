@@ -2,6 +2,7 @@
 using System.Drawing;
 using System.Windows.Forms;
 using DrawingClient.Network;
+using SharedLib.Config;
 using SharedLib.Payloads;
 
 namespace DrawingClient.Forms
@@ -40,7 +41,12 @@ namespace DrawingClient.Forms
             };
 
             Label lblServer = new Label { Text = "Server:", AutoSize = true, Location = new Point(20, 65) };
-            txtServer = new TextBox { Location = new Point(120, 60), Width = 250, Text = "127.0.0.1" };
+            txtServer = new TextBox
+            {
+                Location = new Point(120, 60),
+                Width = 250,
+                Text = EnvLoader.Get("LOAD_BALANCER_HOST", "127.0.0.1")
+            };
 
             Label lblUser = new Label { Text = "Tài khoản:", AutoSize = true, Location = new Point(20, 102) };
             txtUsername = new TextBox { Location = new Point(120, 97), Width = 250 };
@@ -133,7 +139,30 @@ namespace DrawingClient.Forms
             if (string.IsNullOrWhiteSpace(serverIp))
                 serverIp = "127.0.0.1";
 
-            bool connected = _network.Connect(serverIp, 8888, true);
+            int directTcpPort = EnvLoader.GetInt("SERVER_TCP_PORT", 8888);
+            int lbPort = EnvLoader.GetInt("LOAD_BALANCER_PORT", 9000);
+            bool useLbRouting = EnvLoader.Get("USE_LOAD_BALANCER_ROUTING", "1") != "0";
+
+            bool connected = false;
+            if (useLbRouting)
+            {
+                try
+                {
+                    var route = LoadBalancerRouteClient.ResolveAsync(serverIp, lbPort).GetAwaiter().GetResult();
+                    _network.SetAssignedServer(route.Host, route.TcpPort, route.UdpPort);
+                    connected = _network.Connect(route.Host, route.TcpPort, true);
+                    if (connected)
+                        lblStatus.Text = $"Da route toi {route.ServerName} ({route.Host}:{route.TcpPort})";
+                }
+                catch (Exception)
+                {
+                    connected = false;
+                }
+            }
+
+            if (!connected)
+                connected = _network.Connect(serverIp, directTcpPort, true);
+
             if (!connected)
             {
                 lblStatus.Text = "Không thể kết nối máy chủ.";

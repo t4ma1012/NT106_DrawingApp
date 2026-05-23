@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using DrawingServer.Network;
 using DrawingServer.Services;
+using SharedLib.Config;
 using SharedLib.Logging;
 
 namespace DrawingServer
@@ -10,23 +11,23 @@ namespace DrawingServer
     {
         static async Task Main(string[] args)
         {
+            EnvLoader.Load();
             Logger.Initialize("server_logs.txt");
-            Console.WriteLine("Khởi động Drawing Server...");
+            Console.WriteLine("Khoi dong Drawing Server...");
 
-            string pfxPath = "server.pfx";
-            string pfxPassword = "123456";
+            string pfxPath = EnvLoader.Get("SERVER_CERT_PATH", "server.pfx");
+            string pfxPassword = EnvLoader.Get("SERVER_CERT_PASSWORD", "123456");
+            int tcpPort = EnvLoader.GetInt("SERVER_TCP_PORT", 8888);
+            int udpPort = EnvLoader.GetInt("SERVER_UDP_PORT", 8889);
 
             SecureTcpServer tcpServer = new SecureTcpServer();
             SecureUdpServer udpServer = new SecureUdpServer();
 
-            // Chạy UDP ngầm
-            _ = Task.Run(() => udpServer.StartAsync());
-
-            // Khởi động Snapshot tự động mỗi 5 phút
+            CrossServerSyncService.Start();
+            ServerNodeHeartbeatService.Start(tcpPort, udpPort);
+            _ = Task.Run(() => udpServer.StartAsync(udpPort));
             SnapshotService.StartAsync();
-
-            // Chạy TCP chính
-            await tcpServer.StartAsync(pfxPath, pfxPassword);
+            await tcpServer.StartAsync(pfxPath, pfxPassword, tcpPort);
         }
     }
 }

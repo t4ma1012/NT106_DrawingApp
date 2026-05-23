@@ -78,7 +78,6 @@ namespace SharedLib.Packets
         // ── AI FEATURES (TCP) ── Tuần 5-6 ──────────────────────
         AI_TEXT_TO_IMAGE = 0xA0,     // Tuần 5
         AI_BG_REMOVED = 0xA1,     // Tuần 5
-        AI_MAGIC_ERASE = 0xA2,     // Tuần 6
         AI_AUTOCOMPLETE = 0xA3,     // Tuần 6
 
         // ── ADVANCED FEATURES (TCP/UDP) ── Tuần 5-8 ────────────

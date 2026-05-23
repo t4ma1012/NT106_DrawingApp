@@ -1,0 +1,16 @@
+[
+  {
+    "server_id": "server-1",
+    "name": "DrawingServer-1",
+    "host": "100.x.y.s1",
+    "tcp_port": 8888,
+    "udp_port": 8889
+  },
+  {
+    "server_id": "server-2",
+    "name": "DrawingServer-2",
+    "host": "100.x.y.s2",
+    "tcp_port": 8890,
+    "udp_port": 8891
+  }
+]

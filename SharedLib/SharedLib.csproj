@@ -47,8 +47,8 @@
   <ItemGroup>
     <Compile Include="AI\ApiConfig.cs" />
     <Compile Include="Class1.cs" />
+    <Compile Include="Config\EnvLoader.cs" />
     <Compile Include="Logging\Logger.cs" />
-    <Compile Include="obj\Debug\.NETFramework,Version=v4.7.2.AssemblyAttributes.cs" />
     <Compile Include="Packets\PacketDef.cs" />
     <Compile Include="Packets\PacketHelper.cs" />
     <Compile Include="Payloads\AiPayload.cs" />

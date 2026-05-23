@@ -34,6 +34,13 @@ namespace DrawingClient.Network
         public int ServerUdpPort { get; private set; } = 8889;
         public bool IsConnected => _tcpClient?.Connected ?? false;
 
+        public void SetAssignedServer(string serverIp, int tcpPort, int udpPort)
+        {
+            ServerIp = string.IsNullOrWhiteSpace(serverIp) ? "127.0.0.1" : serverIp.Trim();
+            ServerTcpPort = tcpPort > 0 ? tcpPort : 8888;
+            ServerUdpPort = udpPort > 0 ? udpPort : 8889;
+        }
+
         // ── CONNECT / DISCONNECT ────────────────────────────────
 
         public bool Connect(string ip, int port = 8888, bool useSSL = true)
@@ -345,6 +352,14 @@ namespace DrawingClient.Network
                         break;
                     case CommandType.REDO:
                         NetworkEvents.RaiseRedoReceived(PacketHelper.GetPayload<RedoPayload>(p));
+                        break;
+                    case CommandType.DRAW:
+                    case CommandType.TEXT:
+                    case CommandType.SPRAY:
+                        NetworkEvents.RaiseDrawReceived(PacketHelper.GetPayload<DrawPayload>(p));
+                        break;
+                    case CommandType.FLOOD_FILL:
+                        NetworkEvents.RaiseFloodFillReceived(PacketHelper.GetPayload<FloodFillPayload>(p));
                         break;
                     case CommandType.SET_BACKGROUND:
                         NetworkEvents.RaiseSetBackgroundReceived(PacketHelper.GetPayload<SetBackgroundPayload>(p));

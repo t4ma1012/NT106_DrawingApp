@@ -1,7 +1,7 @@
-// ============================================================
+﻿// ============================================================
 // DrawingClient/Network/NetworkEvents.cs
-// Tuần 2→8 — Tất cả events từ network → UI
-// Person A subscribe events này trong MainForm/LobbyForm
+// Tuáº§n 2â†’8 â€” Táº¥t cáº£ events tá»« network â†’ UI
+// Person A subscribe events nÃ y trong MainForm/LobbyForm
 // ============================================================
 using System;
 using SharedLib.Payloads;
@@ -10,16 +10,16 @@ namespace DrawingClient.Network
 {
     /// <summary>
     /// Static event hub: network layer raise, UI layer subscribe.
-    /// Tất cả events đều có thể được gọi từ background thread
-    /// → Person A phải dùng this.Invoke() khi cập nhật UI.
+    /// Táº¥t cáº£ events Ä‘á»u cÃ³ thá»ƒ Ä‘Æ°á»£c gá»i tá»« background thread
+    /// â†’ Person A pháº£i dÃ¹ng this.Invoke() khi cáº­p nháº­t UI.
     /// </summary>
     public static class NetworkEvents
     {
-        // ── AUTH ────────────────────────────────────────────────
+        // â”€â”€ AUTH â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public static event Action<LoginResponse> OnLoginResponse;
         public static event Action<RegisterResponse> OnRegisterResponse;
 
-        // ── ROOM ────────────────────────────────────────────────
+        // â”€â”€ ROOM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public static event Action<CreateRoomResponse> OnCreateRoomResponse;
         public static event Action<JoinRoomResponse> OnJoinRoomResponse;
         public static event Action<RoomMembersPayload> OnRoomMembersReceived;
@@ -27,44 +27,43 @@ namespace DrawingClient.Network
         public static event Action<UserLeavePayload> OnUserLeft;
         public static event Action<CanvasSizePayload> OnCanvasSizeReceived;
 
-        // ── DRAWING (UDP) ───────────────────────────────────────
+        // â”€â”€ DRAWING (UDP) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public static event Action<DrawPayload> OnDrawReceived;
         public static event Action<FloodFillPayload> OnFloodFillReceived;
         public static event Action<ImportImagePayload> OnImportImageReceived;
         public static event Action<SetBackgroundPayload> OnSetBackgroundReceived;
         public static event Action OnClearAllReceived;
 
-        // ── SYNC / UNDO ──────────────────────────────────────────
+        // â”€â”€ SYNC / UNDO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public static event Action<SyncBoardPayload> OnSyncBoardReceived;
         public static event Action<UndoPayload> OnUndoReceived;
         public static event Action<RedoPayload> OnRedoReceived;
         public static event Action<PlaybackResponsePayload> OnPlaybackReceived;
 
-        // ── INTERACTION (UDP) ───────────────────────────────────
+        // â”€â”€ INTERACTION (UDP) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public static event Action<CursorPayload> OnCursorReceived;
         public static event Action<LaserPayload> OnLaserReceived;
         public static event Action<ReactionPayload> OnReactionReceived;
 
-        // ── CHAT / ACTIVITY ─────────────────────────────────────
+        // â”€â”€ CHAT / ACTIVITY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public static event Action<ChatPayload> OnChatReceived;
         public static event Action<ActivityLogPayload> OnActivityLogReceived;
 
-        // ── CLAIM AREA ──────────────────────────────────────────
+        // â”€â”€ CLAIM AREA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public static event Action<ClaimAreaPayload> OnClaimAreaReceived;
         public static event Action<ReleaseAreaPayload> OnReleaseAreaReceived;
 
-        // ── GALLERY ──────────────────────────────────────────────
+        // â”€â”€ GALLERY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public static event Action<GalleryResponsePayload> OnGalleryReceived;
         public static event Action<SaveGalleryResponse> OnSaveGalleryResponse;
         public static event Action<PublicGalleryLinkPayload> OnPublicLinkReceived;
 
-        // ── AI FEATURES (Tuần 5-6) ──────────────────────────────
+        // â”€â”€ AI FEATURES (Tuáº§n 5-6) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public static event Action<AiTextToImageResultPayload> OnAiTextToImageResult;
         public static event Action<AiBgRemovedPayload> OnAiBgRemovedResult;
-        public static event Action<AiMagicEraseResultPayload> OnAiMagicEraseResult;
         public static event Action<AiAutoCompleteResultPayload> OnAiAutoCompleteResult;
 
-        // ── ADVANCED FEATURES (Tuần 5-6) ────────────────────────
+        // â”€â”€ ADVANCED FEATURES (Tuáº§n 5-6) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public static event Action<StickerPayload> OnStickerReceived;
         public static event Action<FollowModePayload> OnFollowModeReceived;
         public static event Action<TurnBasedPayload> OnTurnBasedReceived;
@@ -75,18 +74,18 @@ namespace DrawingClient.Network
         public static event Action<TimelineResponsePayload> OnTimelineResponse;
         public static event Action<SnapshotListPayload> OnSnapshotListReceived;
 
-        // ── GAMIFICATION (Tuần 7-8) ─────────────────────────────
+        // â”€â”€ GAMIFICATION (Tuáº§n 7-8) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public static event Action<DrawingPromptPayload> OnDrawingPromptReceived;
         public static event Action<BlindDrawPayload> OnBlindDrawReceived;
         public static event Action<PixelArtDrawPayload> OnPixelArtDrawReceived;
         public static event Action<PixelArtSyncPayload> OnPixelArtSyncReceived;
         public static event Action<GifExportProgressPayload> OnGifExportProgress;
 
-        // ── CONNECTION ──────────────────────────────────────────
+        // â”€â”€ CONNECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public static event Action OnDisconnected;
         public static event Action OnConnected;
 
-        // ── RAISE METHODS ────────────────────────────────────────
+        // â”€â”€ RAISE METHODS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public static void RaiseLoginResponse(LoginResponse p) => OnLoginResponse?.Invoke(p);
         public static void RaiseRegisterResponse(RegisterResponse p) => OnRegisterResponse?.Invoke(p);
         public static void RaiseCreateRoomResponse(CreateRoomResponse p) => OnCreateRoomResponse?.Invoke(p);
@@ -116,7 +115,6 @@ namespace DrawingClient.Network
         public static void RaisePublicLinkReceived(PublicGalleryLinkPayload p) => OnPublicLinkReceived?.Invoke(p);
         public static void RaiseAiTextToImageResult(AiTextToImageResultPayload p) => OnAiTextToImageResult?.Invoke(p);
         public static void RaiseAiBgRemovedResult(AiBgRemovedPayload p) => OnAiBgRemovedResult?.Invoke(p);
-        public static void RaiseAiMagicEraseResult(AiMagicEraseResultPayload p) => OnAiMagicEraseResult?.Invoke(p);
         public static void RaiseAiAutoCompleteResult(AiAutoCompleteResultPayload p) => OnAiAutoCompleteResult?.Invoke(p);
         public static void RaiseStickerReceived(StickerPayload p) => OnStickerReceived?.Invoke(p);
         public static void RaiseFollowModeReceived(FollowModePayload p) => OnFollowModeReceived?.Invoke(p);

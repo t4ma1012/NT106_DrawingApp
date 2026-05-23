@@ -1,5 +1,20 @@
 # Collaborative Drawing App
 
+## Quick Config (Latest)
+
+1. Copy `.env.example` to `.env` at repo root.
+2. Fill `DATABASE_URL`, `GEMINI_API_KEY`, `REMOVE_BG_API_KEY`.
+3. Optional routing:
+   - `USE_LOAD_BALANCER_ROUTING=1`
+   - configure `LOAD_BALANCER_HOST`, `LOAD_BALANCER_PORT`
+4. Room limit default is controlled by `MAX_ROOM_MEMBERS` (current target: `5`).
+5. For 2-server demo, use `LoadBalancer/servers.example.json` as template for `servers.json`.
+
+## Current AI Scope
+
+- Enabled: text-to-image (Gemini), autocomplete (Gemini), remove background (Remove.bg).
+- Disabled by scope decision: magic erase.
+
 Đây là ứng dụng Vẽ Trực Tuyến Thời Gian Thực hỗ trợ nhiều người cùng kết nối, vẽ và trò chuyện trong một phòng chung. 
 
 Dự án được xây dựng theo mô hình Client - Server bằng C# (.NET) và sử dụng cơ sở dữ liệu PostgreSQL.

@@ -19,10 +19,10 @@ namespace DrawingServer.Network
     {
         private UdpClient _udpListener = null!;
 
-        public async Task StartAsync()
+        public async Task StartAsync(int udpPort = 8889)
         {
-            _udpListener = new UdpClient(8889);
-            Logger.Info("UDP", "Secure UDP Server đang chạy trên port 8889 (AES-256)...");
+            _udpListener = new UdpClient(udpPort);
+            Logger.Info("UDP", $"Secure UDP Server dang chay tren port {udpPort} (AES-256)...");
 
             while (true)
             {
@@ -180,6 +180,8 @@ namespace DrawingServer.Network
                 // Bước 6: Mã hóa và broadcast
                 byte[] encryptedResponse = AesHelper.Encrypt(packet.Serialize());
                 int sentCount = await BroadcastUdpAsync(encryptedResponse, roomCode, result.RemoteEndPoint, packet.Cmd);
+                if (IsCrossServerSyncCommand(packet.Cmd))
+                    _ = CrossServerSyncService.PublishEventAsync(roomCode, packet, username);
                 Logger.Info("UDP", $"Đã broadcast tới {sentCount} client khác.");
             }
             catch (Exception ex)
@@ -232,6 +234,21 @@ namespace DrawingServer.Network
                 || cmd == CommandType.STICKER
                 || cmd == CommandType.IMPORT_IMAGE
                 || cmd == CommandType.PIXEL_ART_DRAW;
+        }
+
+        private static bool IsCrossServerSyncCommand(CommandType cmd)
+        {
+            return cmd == CommandType.DRAW
+                || cmd == CommandType.FLOOD_FILL
+                || cmd == CommandType.TEXT
+                || cmd == CommandType.SPRAY
+                || cmd == CommandType.SET_BACKGROUND
+                || cmd == CommandType.STICKER
+                || cmd == CommandType.IMPORT_IMAGE
+                || cmd == CommandType.PIXEL_ART_DRAW
+                || cmd == CommandType.CHAT
+                || cmd == CommandType.SET_TURNBASED
+                || cmd == CommandType.TURN_CHANGE;
         }
     }
 }

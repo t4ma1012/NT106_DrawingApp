@@ -1,97 +1,155 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
- 
+using Newtonsoft.Json;
+
 namespace LoadBalancer
 {
     public class ServerInfo
     {
-        public string Name { get; set; }
-        public string Host { get; set; }
-        public int Port { get; set; }
-        public int ActiveConnections { get; set; } = 0;
+        public string ServerId { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Host { get; set; } = "";
+        public int TcpPort { get; set; }
+        public int UdpPort { get; set; }
+        public int ActiveProxyConnections { get; set; }
+        public int RoutedClients { get; set; }
         public bool IsHealthy { get; set; } = true;
-        public DateTime LastHealthCheck { get; set; } = DateTime.Now;
- 
-        public override string ToString() =>
-            $"{Name} ({Host}:{Port}) — {ActiveConnections} clients — {(IsHealthy ? "✅ Online" : "❌ Offline")}";
+        public DateTime LastHealthCheck { get; set; } = DateTime.UtcNow;
     }
- 
+
     public class DrawingLoadBalancer
     {
         private readonly List<ServerInfo> _servers = new List<ServerInfo>();
         private readonly object _lock = new object();
         private TcpListener _listener;
- 
-        public void AddServer(string host, int port, string name)
+
+        public void AddServer(string host, int tcpPort, int udpPort, string name, string serverId = "")
         {
-            _servers.Add(new ServerInfo { Host = host, Port = port, Name = name });
-            Console.WriteLine($"[LB] Đã thêm server: {name} ({host}:{port})");
+            if (string.IsNullOrWhiteSpace(serverId))
+                serverId = name;
+
+            var server = new ServerInfo
+            {
+                Host = host,
+                TcpPort = tcpPort,
+                UdpPort = udpPort,
+                Name = name,
+                ServerId = serverId
+            };
+
+            lock (_lock)
+            {
+                _servers.Add(server);
+            }
+
+            Console.WriteLine($"[LB] Added {name} {host}:{tcpPort}/{udpPort}");
         }
- 
+
         public async Task StartAsync(int listenPort)
         {
-            // Bắt đầu health check background
             _ = Task.Run(HealthCheckLoop);
- 
+
             _listener = new TcpListener(IPAddress.Any, listenPort);
             _listener.Start();
-            Console.WriteLine($"[LB] Load Balancer đang lắng nghe cổng {listenPort}");
-            Console.WriteLine($"[LB] Điều hướng tới {_servers.Count} server con\n");
- 
+            Console.WriteLine($"[LB] Listening on {listenPort}");
+
             while (true)
             {
                 TcpClient client = await _listener.AcceptTcpClientAsync();
                 _ = Task.Run(() => HandleClientAsync(client));
             }
         }
- 
+
         private async Task HandleClientAsync(TcpClient clientConn)
         {
-            ServerInfo target = SelectServer();
-            if (target == null)
+            string clientIp = ((IPEndPoint)clientConn.Client.RemoteEndPoint).Address.ToString();
+            NetworkStream clientStream = clientConn.GetStream();
+
+            byte[] probe = new byte[8];
+            int read = 0;
+            try
             {
-                Console.WriteLine($"[{Ts()}] ⚠️  Không có server nào khả dụng, từ chối kết nối.");
+                read = await clientStream.ReadAsync(probe, 0, probe.Length);
+                if (read <= 0)
+                {
+                    clientConn.Close();
+                    return;
+                }
+            }
+            catch
+            {
                 clientConn.Close();
                 return;
             }
- 
-            string clientIp = ((IPEndPoint)clientConn.Client.RemoteEndPoint).Address.ToString();
- 
+
+            string probeText = Encoding.ASCII.GetString(probe, 0, read);
+            if (probeText.StartsWith("ROUTE", StringComparison.OrdinalIgnoreCase))
+            {
+                ServerInfo routeTarget = SelectServer();
+                if (routeTarget == null)
+                {
+                    await SendRouteErrorAsync(clientStream, "no_healthy_server");
+                    clientConn.Close();
+                    return;
+                }
+
+                lock (_lock)
+                {
+                    routeTarget.RoutedClients++;
+                }
+
+                await SendRouteResponseAsync(clientStream, routeTarget);
+                Console.WriteLine($"[LB] ROUTE {clientIp} -> {routeTarget.Name} ({routeTarget.Host}:{routeTarget.TcpPort}/{routeTarget.UdpPort})");
+                clientConn.Close();
+                return;
+            }
+
+            ServerInfo target = SelectServer();
+            if (target == null)
+            {
+                clientConn.Close();
+                return;
+            }
+
             try
             {
-                // Kết nối tới server đích
                 using var serverConn = new TcpClient();
-                await serverConn.ConnectAsync(target.Host, target.Port);
- 
-                lock (_lock) target.ActiveConnections++;
- 
-                Console.WriteLine($"[{Ts()}] 🔀 {clientIp} → {target.Name} " +
-                    $"({target.Port}) — tổng: {target.ActiveConnections} clients");
- 
-                // Chuyển tiếp dữ liệu 2 chiều
-                var t1 = ForwardAsync(clientConn.GetStream(), serverConn.GetStream());
-                var t2 = ForwardAsync(serverConn.GetStream(), clientConn.GetStream());
+                await serverConn.ConnectAsync(target.Host, target.TcpPort);
+
+                lock (_lock)
+                {
+                    target.ActiveProxyConnections++;
+                }
+
+                NetworkStream serverStream = serverConn.GetStream();
+                await serverStream.WriteAsync(probe, 0, read);
+                await serverStream.FlushAsync();
+
+                Console.WriteLine($"[LB] PROXY {clientIp} -> {target.Name} ({target.ActiveProxyConnections} active)");
+
+                var t1 = ForwardAsync(clientStream, serverStream);
+                var t2 = ForwardAsync(serverStream, clientStream);
                 await Task.WhenAny(t1, t2);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[{Ts()}] ❌ Lỗi proxy {clientIp}: {ex.Message}");
+                Console.WriteLine($"[LB] Proxy error: {ex.Message}");
             }
             finally
             {
-                lock (_lock) target.ActiveConnections = Math.Max(0, target.ActiveConnections - 1);
+                lock (_lock)
+                {
+                    target.ActiveProxyConnections = Math.Max(0, target.ActiveProxyConnections - 1);
+                }
                 clientConn.Close();
-                Console.WriteLine($"[{Ts()}] 🔌 {clientIp} ngắt kết nối khỏi {target.Name} " +
-                    $"— còn {target.ActiveConnections} clients");
             }
         }
- 
-        /// <summary>Thuật toán Least-Connection: chọn server ít client nhất còn healthy.</summary>
+
         private ServerInfo SelectServer()
         {
             lock (_lock)
@@ -99,60 +157,123 @@ namespace LoadBalancer
                 ServerInfo best = null;
                 foreach (var s in _servers)
                 {
-                    if (!s.IsHealthy) continue;
-                    if (best == null || s.ActiveConnections < best.ActiveConnections)
+                    if (!s.IsHealthy)
+                        continue;
+
+                    if (best == null)
+                    {
+                        best = s;
+                        continue;
+                    }
+
+                    int bestLoad = best.ActiveProxyConnections + best.RoutedClients;
+                    int curLoad = s.ActiveProxyConnections + s.RoutedClients;
+                    if (curLoad < bestLoad)
                         best = s;
                 }
                 return best;
             }
         }
- 
+
+        private static async Task SendRouteResponseAsync(NetworkStream stream, ServerInfo server)
+        {
+            string json = JsonConvert.SerializeObject(new
+            {
+                host = server.Host,
+                tcpPort = server.TcpPort,
+                udpPort = server.UdpPort,
+                serverId = server.ServerId,
+                serverName = server.Name
+            });
+            byte[] bytes = Encoding.UTF8.GetBytes(json + "\n");
+            await stream.WriteAsync(bytes, 0, bytes.Length);
+            await stream.FlushAsync();
+        }
+
+        private static async Task SendRouteErrorAsync(NetworkStream stream, string error)
+        {
+            string json = JsonConvert.SerializeObject(new { error });
+            byte[] bytes = Encoding.UTF8.GetBytes(json + "\n");
+            await stream.WriteAsync(bytes, 0, bytes.Length);
+            await stream.FlushAsync();
+        }
+
         private async Task ForwardAsync(NetworkStream from, NetworkStream to)
         {
-            byte[] buf = new byte[4096];
-            try
+            byte[] buf = new byte[8192];
+            while (true)
             {
                 int read;
-                while ((read = await from.ReadAsync(buf, 0, buf.Length)) > 0)
+                try
+                {
+                    read = await from.ReadAsync(buf, 0, buf.Length);
+                }
+                catch
+                {
+                    break;
+                }
+
+                if (read <= 0)
+                    break;
+
+                try
+                {
                     await to.WriteAsync(buf, 0, read);
+                    await to.FlushAsync();
+                }
+                catch
+                {
+                    break;
+                }
             }
-            catch { /* kết nối đóng */ }
         }
- 
-        /// <summary>Ping server con mỗi 5 giây, cập nhật IsHealthy.</summary>
+
         private async Task HealthCheckLoop()
         {
             while (true)
             {
                 await Task.Delay(5000);
-                foreach (var server in _servers)
+
+                List<ServerInfo> snapshot;
+                lock (_lock)
                 {
-                    bool wasHealthy = server.IsHealthy;
-                    bool nowHealthy = await PingServerAsync(server.Host, server.Port);
- 
-                    lock (_lock) server.IsHealthy = nowHealthy;
-                    server.LastHealthCheck = DateTime.Now;
- 
-                    if (wasHealthy && !nowHealthy)
-                        Console.WriteLine($"[{Ts()}] ⚠️  {server.Name} went OFFLINE");
-                    else if (!wasHealthy && nowHealthy)
-                        Console.WriteLine($"[{Ts()}] ✅ {server.Name} came back ONLINE");
+                    snapshot = new List<ServerInfo>(_servers);
+                }
+
+                foreach (var server in snapshot)
+                {
+                    bool healthy = await PingAsync(server.Host, server.TcpPort);
+                    bool changed;
+
+                    lock (_lock)
+                    {
+                        changed = server.IsHealthy != healthy;
+                        server.IsHealthy = healthy;
+                        server.LastHealthCheck = DateTime.UtcNow;
+                    }
+
+                    if (changed)
+                    {
+                        Console.WriteLine(healthy
+                            ? $"[LB] {server.Name} ONLINE"
+                            : $"[LB] {server.Name} OFFLINE");
+                    }
                 }
             }
         }
- 
-        private static async Task<bool> PingServerAsync(string host, int port)
+
+        private static async Task<bool> PingAsync(string host, int port)
         {
             try
             {
-                using var ping = new TcpClient();
-                var connectTask = ping.ConnectAsync(host, port);
-                return await Task.WhenAny(connectTask, Task.Delay(2000)) == connectTask
-                       && ping.Connected;
+                using var tcp = new TcpClient();
+                var connectTask = tcp.ConnectAsync(host, port);
+                return await Task.WhenAny(connectTask, Task.Delay(1500)) == connectTask && tcp.Connected;
             }
-            catch { return false; }
+            catch
+            {
+                return false;
+            }
         }
- 
-        private static string Ts() => DateTime.Now.ToString("HH:mm:ss");
     }
 }

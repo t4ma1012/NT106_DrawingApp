@@ -1,37 +1,37 @@
-// ============================================================
-// DrawingServer/Services/RoomService.cs
-// Person C (Server) — Room Management Service
-// Handles room lifecycle and member management
-// ============================================================
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using DrawingServer.Database;
 using DrawingServer.Network;
-using SharedLib.Payloads;
+using SharedLib.Config;
 using SharedLib.Logging;
+using SharedLib.Payloads;
 
 namespace DrawingServer.Services
 {
     public static class RoomService
     {
-        private static Dictionary<string, RoomState> _activeRooms = new Dictionary<string, RoomState>();
+        private static readonly Dictionary<string, RoomState> ActiveRooms = new Dictionary<string, RoomState>(StringComparer.OrdinalIgnoreCase);
+        private static readonly object SyncRoot = new object();
 
         public class RoomState
         {
-            public string RoomCode { get; set; }
-            public string OwnerId { get; set; }
-
-            // Ép buộc dùng đúng ClientSession "hàng real" của Network
+            public string RoomCode { get; set; } = "";
+            public string OwnerId { get; set; } = "";
             public List<DrawingServer.Network.ClientSession> Members { get; set; } = new List<DrawingServer.Network.ClientSession>();
-
             public int CanvasWidth { get; set; } = 1280;
             public int CanvasHeight { get; set; } = 720;
-            public DateTime CreatedTime { get; set; }
+            public DateTime CreatedTime { get; set; } = DateTime.UtcNow;
             public bool IsActive { get; set; } = true;
             public bool IsTurnBasedEnabled { get; set; }
             public string ActiveDrawingUser { get; set; } = "";
+            public int MaxMembers { get; set; } = GetDefaultMaxMembers();
+        }
+
+        public static int GetDefaultMaxMembers()
+        {
+            return Math.Max(1, EnvLoader.GetInt("MAX_ROOM_MEMBERS", 5));
         }
 
         public static async Task<(bool Success, string RoomCode, string Message)> CreateRoomAsync(string ownerUsername, int canvasWidth = 1280, int canvasHeight = 720)
@@ -42,22 +42,22 @@ namespace DrawingServer.Services
                     return (false, "", "Invalid owner username");
 
                 string roomCode = await DbManager.CreateRoomAsync(ownerUsername, canvasWidth, canvasHeight);
-
                 if (string.IsNullOrEmpty(roomCode))
                     return (false, "", "Failed to create room in database");
 
-                lock (_activeRooms)
+                lock (SyncRoot)
                 {
-                    if (!_activeRooms.ContainsKey(roomCode))
+                    if (!ActiveRooms.ContainsKey(roomCode))
                     {
-                        _activeRooms[roomCode] = new RoomState
+                        ActiveRooms[roomCode] = new RoomState
                         {
                             RoomCode = roomCode,
                             OwnerId = ownerUsername,
                             CanvasWidth = canvasWidth,
                             CanvasHeight = canvasHeight,
-                            CreatedTime = DateTime.Now,
-                            IsActive = true
+                            CreatedTime = DateTime.UtcNow,
+                            IsActive = true,
+                            MaxMembers = GetDefaultMaxMembers()
                         };
                     }
                 }
@@ -72,47 +72,52 @@ namespace DrawingServer.Services
             }
         }
 
-        // Ép buộc tham số truyền vào phải là "hàng real"
-        public static async Task<bool> AddMemberToRoomAsync(string roomCode, DrawingServer.Network.ClientSession clientSession)
+        public static async Task<(bool Success, string Message)> TryAddMemberToRoomAsync(string roomCode, DrawingServer.Network.ClientSession clientSession)
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(roomCode) || clientSession == null)
-                    return false;
+                if (string.IsNullOrWhiteSpace(roomCode) || clientSession == null || string.IsNullOrWhiteSpace(clientSession.Username))
+                    return (false, "Invalid join request");
 
                 bool roomExists = await DbManager.CheckRoomExistsAsync(roomCode);
                 if (!roomExists)
-                {
-                    Logger.Warning("Room", $"Room {roomCode} does not exist in database");
-                    return false;
-                }
+                    return (false, "Room does not exist");
 
-                lock (_activeRooms)
+                lock (SyncRoot)
                 {
-                    if (!_activeRooms.ContainsKey(roomCode))
+                    if (!ActiveRooms.ContainsKey(roomCode))
                     {
-                        _activeRooms[roomCode] = new RoomState
+                        ActiveRooms[roomCode] = new RoomState
                         {
                             RoomCode = roomCode,
-                            IsActive = true
+                            IsActive = true,
+                            MaxMembers = GetDefaultMaxMembers()
                         };
                     }
 
-                    var room = _activeRooms[roomCode];
-                    if (!room.Members.Any(m => m.Username == clientSession.Username))
+                    RoomState room = ActiveRooms[roomCode];
+                    if (room.Members.Any(m => string.Equals(m.Username, clientSession.Username, StringComparison.OrdinalIgnoreCase)))
                     {
-                        clientSession.RoomCode = roomCode; // Sẽ không còn lỗi đỏ ở đây nữa
-                        room.Members.Add(clientSession);
-                        Logger.Info("Room", $"Added {clientSession.Username} to room {roomCode} ({room.Members.Count} members)");
+                        clientSession.RoomCode = roomCode;
+                        return (true, "Already in room");
                     }
-                }
 
-                return true;
+                    if (room.Members.Count >= room.MaxMembers)
+                    {
+                        return (false, $"Room is full ({room.MaxMembers} members)");
+                    }
+
+                    clientSession.RoomCode = roomCode;
+                    room.Members.Add(clientSession);
+                    room.IsActive = true;
+                    Logger.Info("Room", $"Added {clientSession.Username} to room {roomCode} ({room.Members.Count}/{room.MaxMembers})");
+                    return (true, "Joined");
+                }
             }
             catch (Exception ex)
             {
                 Logger.Error("Room", $"Error adding member to room: {ex.Message}");
-                return false;
+                return (false, ex.Message);
             }
         }
 
@@ -120,26 +125,22 @@ namespace DrawingServer.Services
         {
             try
             {
-                lock (_activeRooms)
+                lock (SyncRoot)
                 {
-                    if (!_activeRooms.ContainsKey(roomCode))
+                    if (!ActiveRooms.TryGetValue(roomCode, out RoomState room))
                         return false;
 
-                    var room = _activeRooms[roomCode];
-                    var member = room.Members.FirstOrDefault(m => m.Username == username);
-                    if (member != null)
-                    {
-                        room.Members.Remove(member);
-                        Logger.Info("Room", $"Removed {username} from room {roomCode} ({room.Members.Count} members left)");
+                    var member = room.Members.FirstOrDefault(m => string.Equals(m.Username, username, StringComparison.OrdinalIgnoreCase));
+                    if (member == null)
+                        return false;
 
-                        if (room.Members.Count == 0)
-                        {
-                            room.IsActive = false;
-                        }
-                        return true;
-                    }
+                    room.Members.Remove(member);
+                    if (room.Members.Count == 0)
+                        room.IsActive = false;
+
+                    Logger.Info("Room", $"Removed {username} from room {roomCode} ({room.Members.Count}/{room.MaxMembers})");
+                    return true;
                 }
-                return false;
             }
             catch (Exception ex)
             {
@@ -148,128 +149,87 @@ namespace DrawingServer.Services
             }
         }
 
-        public static List<(string Username, string Color, bool IsOnline)> GetRoomMembers(string roomCode)
-        {
-            var members = new List<(string, string, bool)>();
-
-            lock (_activeRooms)
-            {
-                if (!_activeRooms.ContainsKey(roomCode))
-                    return members;
-
-                var room = _activeRooms[roomCode];
-                foreach (var clientSession in room.Members)
-                {
-                    var userSession = AuthService.GetUserSession(clientSession.Username);
-                    if (userSession != null)
-                    {
-                        members.Add((clientSession.Username, userSession.AssignedColor, true));
-                    }
-                    else
-                    {
-                        members.Add((clientSession.Username, clientSession.AssignedColor, true));
-                    }
-                }
-            }
-
-            return members;
-        }
-
         public static RoomState GetRoomState(string roomCode)
         {
-            lock (_activeRooms)
+            lock (SyncRoot)
             {
-                if (_activeRooms.TryGetValue(roomCode, out var room))
-                    return room;
+                ActiveRooms.TryGetValue(roomCode, out RoomState room);
+                return room;
             }
-            return null;
         }
 
         public static bool IsRoomActive(string roomCode)
         {
-            lock (_activeRooms)
+            lock (SyncRoot)
             {
-                if (_activeRooms.TryGetValue(roomCode, out var room))
-                    return room.IsActive && room.Members.Count > 0;
+                if (!ActiveRooms.TryGetValue(roomCode, out RoomState room))
+                    return false;
+                return room.IsActive && room.Members.Count > 0;
             }
-            return false;
         }
 
         public static int GetActiveRoomsCount()
         {
-            lock (_activeRooms)
+            lock (SyncRoot)
             {
-                return _activeRooms.Count(r => r.Value.IsActive);
+                return ActiveRooms.Count(r => r.Value.IsActive);
             }
         }
 
         public static int GetRoomMemberCount(string roomCode)
         {
-            lock (_activeRooms)
+            lock (SyncRoot)
             {
-                if (_activeRooms.TryGetValue(roomCode, out var room))
-                    return room.Members.Count;
+                return ActiveRooms.TryGetValue(roomCode, out RoomState room) ? room.Members.Count : 0;
             }
-            return 0;
         }
 
-        public static async Task BroadcastToRoomAsync(string roomCode, byte[] encryptedData)
+        public static List<(string Username, string Color, bool IsOnline)> GetRoomMembers(string roomCode)
         {
-            lock (_activeRooms)
+            var members = new List<(string, string, bool)>();
+            lock (SyncRoot)
             {
-                if (!_activeRooms.TryGetValue(roomCode, out var room))
-                    return;
+                if (!ActiveRooms.TryGetValue(roomCode, out RoomState room))
+                    return members;
 
-                foreach (var member in room.Members)
+                foreach (DrawingServer.Network.ClientSession clientSession in room.Members)
                 {
-                    if (member.UdpEndPoint != null)
-                    {
-                        try
-                        {
-                            _ = Task.Run(async () =>
-                            {
-                                try
-                                {
-                                    var udpClient = new System.Net.Sockets.UdpClient();
-                                    await udpClient.SendAsync(encryptedData, encryptedData.Length, member.UdpEndPoint);
-                                    udpClient.Close();
-                                }
-                                catch { /* ignore send errors */ }
-                            });
-                        }
-                        catch { /* ignore */ }
-                    }
+                    var userSession = AuthService.GetUserSession(clientSession.Username);
+                    if (userSession != null)
+                        members.Add((clientSession.Username, userSession.AssignedColor, true));
+                    else
+                        members.Add((clientSession.Username, clientSession.AssignedColor, true));
                 }
             }
+            return members;
         }
 
         public static List<MemberInfo> GetRoomMembersInfo(string roomCode)
         {
             var infos = new List<MemberInfo>();
-
-            lock (_activeRooms)
+            lock (SyncRoot)
             {
-                if (!_activeRooms.TryGetValue(roomCode, out var room))
+                if (!ActiveRooms.TryGetValue(roomCode, out RoomState room))
                     return infos;
 
-                foreach (var client in room.Members)
+                foreach (DrawingServer.Network.ClientSession client in room.Members)
                 {
                     var authSession = AuthService.GetUserSession(client.Username);
-                    if (authSession != null)
+                    int colorArgb = 0;
+                    if (authSession != null && !string.IsNullOrWhiteSpace(authSession.AssignedColor))
                     {
-                        int colorARGB = int.Parse(authSession.AssignedColor.TrimStart('#'), System.Globalization.NumberStyles.HexNumber);
-
-                        infos.Add(new MemberInfo
-                        {
-                            Username = client.Username,
-                            ColorARGB = colorARGB,
-                            IsSpectator = false,
-                            IsOnline = true
-                        });
+                        int.TryParse(authSession.AssignedColor.TrimStart('#'), System.Globalization.NumberStyles.HexNumber, null, out colorArgb);
                     }
+
+                    infos.Add(new MemberInfo
+                    {
+                        Username = client.Username,
+                        ColorARGB = colorArgb,
+                        IsSpectator = false,
+                        IsOnline = true
+                    });
                 }
             }
-
             return infos;
         }
     }

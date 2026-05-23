@@ -293,7 +293,7 @@ namespace DrawingClient.Forms
                 canvasManager.ResizeCanvas(int.Parse(dims[0]), int.Parse(dims[1]));
             };
 
-            Button btnUndo = new Button { Text = "Hoàn tác", Location = new Point(10, 220), Size = new Size(200, 30) };
+            Button btnUndo = new Button { Text = "Hoàn tác (Ctrl+Z)", Location = new Point(10, 220), Size = new Size(200, 30) };
             btnUndo.Click += (s, e) =>
             {
                 if (!EnsureCanDraw()) return;
@@ -301,7 +301,7 @@ namespace DrawingClient.Forms
                 _network?.SendUndo(Guid.NewGuid().ToString());
             };
 
-            Button btnRedo = new Button { Text = "Làm lại", Location = new Point(10, 255), Size = new Size(200, 30) };
+            Button btnRedo = new Button { Text = "Làm lại (Ctrl+Y)", Location = new Point(10, 255), Size = new Size(200, 30) };
             btnRedo.Click += (s, e) =>
             {
                 if (!EnsureCanDraw()) return;
@@ -677,9 +677,9 @@ namespace DrawingClient.Forms
         private async void BtnAiTextToDrawing_Click(object sender, EventArgs e)
         {
             if (!EnsureCanDraw()) return;
-            if (!ApiConfig.IsStabilityConfigured())
+            if (!ApiConfig.IsGeminiConfigured())
             {
-                MessageBox.Show("Bạn chưa cấu hình Stability AI API key trong SharedLib/AI/ApiConfig.cs.", "Thiếu API key");
+                MessageBox.Show("Chua cau hinh GEMINI_API_KEY trong .env.", "Thieu API key");
                 return;
             }
 
@@ -689,9 +689,9 @@ namespace DrawingClient.Forms
 
             await RunButtonTaskAsync(sender as Button, "AI đang tạo ảnh...", async () =>
             {
-                byte[] imageBytes = await StabilityAiClient.GenerateImageAsync(prompt.Trim());
+                byte[] imageBytes = await GeminiClient.GenerateImageAsync(prompt.Trim());
                 if (imageBytes == null || imageBytes.Length == 0)
-                    throw new InvalidOperationException("Stability AI không trả về ảnh.");
+                    throw new InvalidOperationException("Gemini khong tra ve anh.");
 
                 using (Image aiImage = CreateImageFromBytes(imageBytes))
                 {
@@ -708,7 +708,7 @@ namespace DrawingClient.Forms
             if (!EnsureCanDraw()) return;
             if (!ApiConfig.IsRemoveBgConfigured())
             {
-                MessageBox.Show("Bạn chưa cấu hình remove.bg API key trong SharedLib/AI/ApiConfig.cs.", "Thiếu API key");
+                MessageBox.Show("Chua cau hinh REMOVE_BG_API_KEY trong .env.", "Thieu API key");
                 return;
             }
 
@@ -1234,6 +1234,29 @@ namespace DrawingClient.Forms
                 var pos = canvas.PointToClient(Cursor.Position);
                 _udpManager?.SendLaser(new LaserPayload { Username = _network.CurrentUsername, X = pos.X, Y = pos.Y, IsActive = false });
             }
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == (Keys.Control | Keys.Z))
+            {
+                if (EnsureCanDraw())
+                {
+                    canvasManager.Undo();
+                    _network?.SendUndo(Guid.NewGuid().ToString());
+                }
+                return true;
+            }
+            if (keyData == (Keys.Control | Keys.Y))
+            {
+                if (EnsureCanDraw())
+                {
+                    canvasManager.Redo();
+                    _network?.SendRedo(Guid.NewGuid().ToString());
+                }
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         private void UIInvoke(Action action)
