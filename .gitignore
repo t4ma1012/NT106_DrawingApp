@@ -480,15 +480,3 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
-
-# Bỏ qua các thư mục build cục bộ
-[Bb]in/
-[Oo]bj/
-
-# Bỏ qua các file cache và cấu hình cá nhân
-*.user
-*.suo
-*.cache
-
-# Bỏ qua thư mục log
-logs/

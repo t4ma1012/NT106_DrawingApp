@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
-using System.Text.Json;
 using System.Threading.Tasks;
 using SharedLib.Packets; // Sử dụng PacketDef của Người B
 
@@ -23,49 +21,47 @@ namespace DrawingServer
                 try
                 {
                     UdpReceiveResult result = await _udpListener.ReceiveAsync();
-                    byte[] receivedBytes = result.Buffer; // Biến ở đây tên là receivedBytes
+                    byte[] receivedBytes = result.Buffer;
                     IPEndPoint senderEndPoint = result.RemoteEndPoint;
 
-                    // Mở gói tin UDP bằng PacketDef (đã sửa thành receivedBytes)
+                    // Dùng code của B để mở gói tin kiểm tra lệnh
                     Packet packet = Packet.Deserialize(receivedBytes);
 
-                    // Nếu là lệnh VẼ (DRAW)
-                    if (packet.Cmd == CommandType.DRAW)
+                    // Chỉ phát sóng nếu là lệnh vẽ/tương tác của Tuần 2
+                    if (packet.Cmd == CommandType.DRAW ||
+                        packet.Cmd == CommandType.CURSOR ||
+                        packet.Cmd == CommandType.LASER ||
+                        packet.Cmd == CommandType.FLOOD_FILL ||
+                        packet.Cmd == CommandType.TEXT ||
+                        packet.Cmd == CommandType.REACTION)
                     {
-                        string jsonPayload = Encoding.UTF8.GetString(packet.Payload);
-
-                        // Phân tích JSON để lấy mã phòng, người vẽ và ActionId
-                        var drawData = JsonSerializer.Deserialize<System.Collections.Generic.Dictionary<string, JsonElement>>(jsonPayload);
-
-                        string roomCode = drawData != null && drawData.ContainsKey("RoomCode") ? drawData["RoomCode"].GetString() ?? "" : "";
-                        string actionId = drawData != null && drawData.ContainsKey("ActionId") ? drawData["ActionId"].GetString() ?? Guid.NewGuid().ToString() : Guid.NewGuid().ToString();
-                        string username = drawData != null && drawData.ContainsKey("Username") ? drawData["Username"].GetString() ?? "unknown" : "unknown";
-
-                        // 1. LƯU NÉT VẼ VÀO DATABASE (Chạy ngầm không đợi để tránh lag)
-                        if (!string.IsNullOrEmpty(roomCode))
-                        {
-                            _ = Database.DbManager.SaveStrokeAsync(roomCode, actionId, jsonPayload, username);
-                        }
-
-                        // 2. CHỈ GỬI CHO NHỮNG NGƯỜI TRONG CÙNG PHÒNG (Ngoại trừ người vừa vẽ)
-                        foreach (var client in Server.Clients.Values)
-                        {
-                            // Kiểm tra xem Client này có đang ở đúng cái phòng đó không
-                            if (client.RoomCode == roomCode && client.UdpEndPoint != null)
-                            {
-                                // Không gửi ngược lại nét vẽ cho chính người vừa vẽ
-                                if (!client.UdpEndPoint.Equals(result.RemoteEndPoint))
-                                {
-                                    // Đã sửa thành receivedBytes
-                                    await _udpListener.SendAsync(receivedBytes, receivedBytes.Length, client.UdpEndPoint);
-                                }
-                            }
-                        }
+                        // Gửi thẳng mảng byte gốc để tăng tốc độ server
+                        await BroadcastAsync(receivedBytes, senderEndPoint);
                     }
                 }
                 catch (Exception)
                 {
                     // Bỏ qua im lặng các gói tin rác hoặc không parse được
+                }
+            }
+        }
+
+        private async Task BroadcastAsync(byte[] data, IPEndPoint senderEndPoint)
+        {
+            foreach (var kvp in Server.Clients)
+            {
+                var session = kvp.Value;
+
+                // Tuần 2: Bỏ qua nếu người gửi đang ở chế độ Chỉ Xem (Spectator)
+                if (session.IsSpectator && session.UdpEndPoint != null && session.UdpEndPoint.Equals(senderEndPoint))
+                {
+                    continue;
+                }
+
+                // Gửi tới tất cả các client KHÁC
+                if (session.UdpEndPoint != null && !session.UdpEndPoint.Equals(senderEndPoint))
+                {
+                    await _udpListener.SendAsync(data, data.Length, session.UdpEndPoint);
                 }
             }
         }

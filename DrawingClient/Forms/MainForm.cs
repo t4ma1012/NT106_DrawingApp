@@ -15,8 +15,7 @@ namespace DrawingClient.Forms
     {
         private readonly ClientNetwork _network;
         private readonly string _roomCode;
-        private SecureUdpSender _udpSender;
-        private SecureUdpReceiver _udpReceiver;
+        private UdpManager _udpManager;
 
         private DoubleBufferedPictureBox canvas;
         private Panel toolPanel;
@@ -72,7 +71,7 @@ namespace DrawingClient.Forms
 
             canvasManager.OnNetworkDrawAction = (p1, p2, color, width) =>
             {
-                if (_udpSender == null)
+                if (_udpManager == null)
                     return;
 
                 DrawPayload payload = new DrawPayload
@@ -89,29 +88,39 @@ namespace DrawingClient.Forms
                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                 };
 
-                _udpSender.SendDraw(payload);
+                _udpManager.SendDraw(payload);
             };
 
             canvasManager.OnClaimAreaSelected = rect =>
             {
-                _network?.SendClaimArea(Guid.NewGuid().ToString(), rect.Left, rect.Top, rect.Right, rect.Bottom);
+                // FIX LỖI: Dùng hàm Send tổng quát
+                _network?.Send(CommandType.CLAIM_AREA, new ClaimAreaPayload
+                {
+                    ClaimID = Guid.NewGuid().ToString(),
+                    Username = _network.CurrentUsername,
+                    X1 = rect.Left,
+                    Y1 = rect.Top,
+                    X2 = rect.Right,
+                    Y2 = rect.Bottom,
+                    DurationSeconds = 30
+                });
                 AppendLog($"Khoanh vùng sở hữu: [{rect.Left},{rect.Top}] - [{rect.Right},{rect.Bottom}]");
             };
 
             canvasManager.OnNetworkFloodFillAction = payload =>
             {
-                if (_udpSender == null || payload == null)
+                if (_udpManager == null || payload == null)
                     return;
                 payload.Username = _network.CurrentUsername;
-                _udpSender.SendFloodFill(payload);
+                _udpManager.SendFloodFill(payload);
             };
 
             canvasManager.OnNetworkTextAction = payload =>
             {
-                if (_udpSender == null || payload == null)
+                if (_udpManager == null || payload == null)
                     return;
                 payload.Username = _network.CurrentUsername;
-                _udpSender.SendDraw(payload);
+                _udpManager.SendDraw(payload);
             };
         }
 
@@ -119,15 +128,17 @@ namespace DrawingClient.Forms
         {
             try
             {
-                _udpSender = new SecureUdpSender("127.0.0.1", 8889);
-                _udpReceiver = new SecureUdpReceiver(8889);
-                _udpReceiver.Start();
+                _udpManager = new UdpManager("127.0.0.1", 8889);
+                _udpManager.Start();
+                AppendLog($"UDP sẵn sàng trên port {_udpManager.LocalPort}");
             }
-            catch
+            catch (Exception ex)
             {
-                AppendLog("UDP realtime chưa sẵn sàng.");
+                AppendLog($"UDP chưa sẵn sàng: {ex.Message}");
             }
         }
+
+
 
         private void SubscribeNetworkEvents()
         {
@@ -175,8 +186,7 @@ namespace DrawingClient.Forms
             NetworkEvents.OnStickyNoteReceived -= NetworkEvents_OnStickyNoteReceived;
             NetworkEvents.OnFollowModeReceived -= NetworkEvents_OnFollowModeReceived;
             NetworkEvents.OnGifExportProgress -= NetworkEvents_OnGifExportProgress;
-            _udpReceiver?.Stop();
-            _udpSender?.Close();
+            _udpManager?.Stop();
         }
 
         private void InitializeUI()
@@ -201,7 +211,7 @@ namespace DrawingClient.Forms
             this.KeyUp += MainForm_KeyUp;
 
             canvas.MouseMove += Canvas_MouseMove_SendCursor;
-            canvas.MouseClick += Canvas_MouseClick_AdvancedTools;
+            canvas.MouseDown += Canvas_MouseClick_AdvancedTools;
 
             cursorLayer = new CursorLayer(canvas);
         }
@@ -347,7 +357,9 @@ namespace DrawingClient.Forms
         {
             turnPanel = new TurnPanelControl { Dock = DockStyle.Top };
             playbackPanel = new PlaybackPanelControl { Dock = DockStyle.Top };
-            playbackPanel.RequestPlayback += () => _network?.SendRequestPlayback();
+
+            // FIX LỖI: Dùng hàm Send tổng quát
+            playbackPanel.RequestPlayback += () => _network?.Send(CommandType.REQUEST_PLAYBACK, new PlaybackRequestPayload { RoomCode = _roomCode });
 
             TabControl tabs = new TabControl { Dock = DockStyle.Fill };
             TabPage tabChat = new TabPage("Chat");
@@ -385,14 +397,14 @@ namespace DrawingClient.Forms
 
         private void Canvas_MouseMove_SendCursor(object sender, MouseEventArgs e)
         {
-            if (_udpSender == null || string.IsNullOrWhiteSpace(_network?.CurrentUsername))
+            if (_udpManager == null || string.IsNullOrWhiteSpace(_network?.CurrentUsername))
                 return;
 
             long now = Environment.TickCount;
             if (now - lastCursorSend >= CursorSendIntervalMs)
             {
                 lastCursorSend = now;
-                _udpSender.SendCursor(new CursorPayload
+                _udpManager.SendCursor(new CursorPayload
                 {
                     Username = _network.CurrentUsername,
                     X = e.X,
@@ -403,7 +415,7 @@ namespace DrawingClient.Forms
             if ((ModifierKeys & Keys.Alt) == Keys.Alt && now - lastLaserSend >= CursorSendIntervalMs)
             {
                 lastLaserSend = now;
-                _udpSender.SendLaser(new LaserPayload
+                _udpManager.SendLaser(new LaserPayload
                 {
                     Username = _network.CurrentUsername,
                     X = e.X,
@@ -415,18 +427,19 @@ namespace DrawingClient.Forms
 
         private void Canvas_MouseClick_AdvancedTools(object sender, MouseEventArgs e)
         {
-            if (e.Button != MouseButtons.Left)
-                return;
+            if (e.Button != MouseButtons.Left) return;
 
             if (isPlacingSticker)
             {
+                Point actualPoint = canvasManager.ScreenToCanvas(e.Location);
+
                 var payload = new StickerPayload
                 {
                     ActionID = Guid.NewGuid().ToString(),
-                    Username = _network.CurrentUsername,
+                    Username = _network?.CurrentUsername,
                     StickerID = string.IsNullOrWhiteSpace(selectedStickerId) ? "star" : selectedStickerId,
-                    X = e.X,
-                    Y = e.Y,
+                    X = actualPoint.X,
+                    Y = actualPoint.Y,
                     Width = 36,
                     Height = 36,
                     Rotation = 0,
@@ -435,13 +448,15 @@ namespace DrawingClient.Forms
 
                 canvasManager.AddSticker(payload);
                 _network?.SendSticker(payload);
+
+                isPlacingSticker = false;
                 return;
             }
 
             if (isStickyNoteMode)
             {
                 string noteId = Guid.NewGuid().ToString();
-                var note = new StickyNoteControl { NoteId = noteId, Author = _network.CurrentUsername, Location = e.Location };
+                var note = new StickyNoteControl { NoteId = noteId, Author = _network?.CurrentUsername, Location = e.Location };
                 note.NoteChanged += StickyNoteChanged;
                 canvas.Controls.Add(note);
                 note.BringToFront();
@@ -450,13 +465,16 @@ namespace DrawingClient.Forms
                 _network?.SendStickyNote(new StickyNotePayload
                 {
                     NoteID = noteId,
-                    AuthorUsername = _network.CurrentUsername,
+                    AuthorUsername = _network?.CurrentUsername,
                     X = e.X,
                     Y = e.Y,
                     Text = note.NoteText,
                     IsOpen = true,
                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                 });
+
+                isStickyNoteMode = false;
+                return;
             }
         }
 
@@ -491,7 +509,19 @@ namespace DrawingClient.Forms
                     {
                         image.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
                         string base64 = Convert.ToBase64String(ms.ToArray());
-                        _network?.SendImportImage(target.X, target.Y, target.Width, target.Height, base64);
+
+                        // FIX LỖI: Dùng hàm Send tổng quát
+                        _network?.Send(CommandType.IMPORT_IMAGE, new ImportImagePayload
+                        {
+                            ActionID = Guid.NewGuid().ToString(),
+                            Username = _network.CurrentUsername,
+                            X = target.X,
+                            Y = target.Y,
+                            Width = target.Width,
+                            Height = target.Height,
+                            ImageData = base64,
+                            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                        });
                     }
                 }
             }
@@ -514,8 +544,12 @@ namespace DrawingClient.Forms
         private void SendChatMessage()
         {
             string message = txtChatInput.Text?.Trim();
-            if (string.IsNullOrWhiteSpace(message))
-                return;
+            if (string.IsNullOrWhiteSpace(message)) return;
+
+            // Hiển thị tin nhắn của mình ngay lập tức (không chờ server echo lại)
+            string myName = _network?.CurrentUsername ?? "Tôi";
+            lstChat.Items.Add($"[{DateTime.Now:HH:mm}] {myName}: {message}");
+            lstChat.TopIndex = lstChat.Items.Count - 1;
 
             _network?.SendChat(message);
             txtChatInput.Clear();
@@ -572,8 +606,58 @@ namespace DrawingClient.Forms
                 return;
             UIInvoke(() =>
             {
+                // ✅ FIX: Clear canvas trước khi replay để tránh bị chồng nét khi reconnect
+                canvasManager.ClearAll();
+
                 foreach (var action in payload.Actions)
-                    canvasManager.ApplyDrawAction(action);
+                {
+                    string tool = action.ToolType ?? "";
+
+                    if (tool.Equals("FloodFill", StringComparison.OrdinalIgnoreCase))
+                    {
+                        canvasManager.ApplyRemoteFloodFill(new SharedLib.Payloads.FloodFillPayload
+                        {
+                            X = action.X1,
+                            Y = action.Y1,
+                            ColorARGB = action.ColorARGB
+                        });
+                    }
+                    else if (tool.Equals("SetBackground", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // ✅ FIX: Replay màu nền khi reconnect
+                        canvasManager.ApplyRemoteSetBackground(new SharedLib.Payloads.SetBackgroundPayload
+                        {
+                            ColorARGB = action.ColorARGB
+                        });
+                    }
+                    else if (tool.Equals("Sticker", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // ✅ FIX: Replay sticker khi reconnect
+                        canvasManager.AddSticker(new SharedLib.Payloads.StickerPayload
+                        {
+                            StickerID = action.Text,   // StickerID được map vào field Text khi lưu
+                            X         = action.X1,
+                            Y         = action.Y1,
+                            Width     = action.ImageWidth  > 0 ? action.ImageWidth  : 64,
+                            Height    = action.ImageHeight > 0 ? action.ImageHeight : 64,
+                        });
+                    }
+                    else if (tool.Equals("ImportImage", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(action.ImageData))
+                    {
+                        canvasManager.ApplyRemoteImportImage(new SharedLib.Payloads.ImportImagePayload
+                        {
+                            X = action.X1,
+                            Y = action.Y1,
+                            Width = action.ImageWidth > 0 ? action.ImageWidth : 400,
+                            Height = action.ImageHeight > 0 ? action.ImageHeight : 300,
+                            ImageData = action.ImageData
+                        });
+                    }
+                    else
+                    {
+                        canvasManager.ApplyDrawAction(action);
+                    }
+                }
                 AppendLog($"Đồng bộ {payload.Actions.Count} hành động từ phòng");
             });
         }
@@ -714,19 +798,19 @@ namespace DrawingClient.Forms
             {
                 var pos = canvas.PointToClient(Cursor.Position);
                 cursorLayer.AddEmoji("👍", pos);
-                _udpSender?.SendReaction(new ReactionPayload { Username = _network.CurrentUsername, Emoji = "👍", X = pos.X, Y = pos.Y });
+                _udpManager?.SendReaction(new ReactionPayload { Username = _network.CurrentUsername, Emoji = "👍", X = pos.X, Y = pos.Y });
             }
             if (e.KeyCode == Keys.D2)
             {
                 var pos = canvas.PointToClient(Cursor.Position);
                 cursorLayer.AddEmoji("❤️", pos);
-                _udpSender?.SendReaction(new ReactionPayload { Username = _network.CurrentUsername, Emoji = "❤️", X = pos.X, Y = pos.Y });
+                _udpManager?.SendReaction(new ReactionPayload { Username = _network.CurrentUsername, Emoji = "❤️", X = pos.X, Y = pos.Y });
             }
             if (e.KeyCode == Keys.D3)
             {
                 var pos = canvas.PointToClient(Cursor.Position);
                 cursorLayer.AddEmoji("😂", pos);
-                _udpSender?.SendReaction(new ReactionPayload { Username = _network.CurrentUsername, Emoji = "😂", X = pos.X, Y = pos.Y });
+                _udpManager?.SendReaction(new ReactionPayload { Username = _network.CurrentUsername, Emoji = "😂", X = pos.X, Y = pos.Y });
             }
         }
 
@@ -738,7 +822,7 @@ namespace DrawingClient.Forms
             if (e.KeyCode == Keys.Menu)
             {
                 var pos = canvas.PointToClient(Cursor.Position);
-                _udpSender?.SendLaser(new LaserPayload { Username = _network.CurrentUsername, X = pos.X, Y = pos.Y, IsActive = false });
+                _udpManager?.SendLaser(new LaserPayload { Username = _network.CurrentUsername, X = pos.X, Y = pos.Y, IsActive = false });
             }
         }
 

@@ -19,6 +19,7 @@ namespace SharedLib.Payloads
     {
         public string RequesterUsername { get; set; }
         public string ActionID { get; set; }
+        public string Prompt { get; set; }      // ✅ Lưu prompt để ghi DB
         public string ImageData { get; set; }   // base64 PNG
         public int X { get; set; }
         public int Y { get; set; }

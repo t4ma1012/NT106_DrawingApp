@@ -141,20 +141,4 @@ namespace SharedLib.Payloads
         public string RoomCode { get; set; }
     }
 
-    /// <summary>Pixel Art — Tuần 8 — UDP sync ô pixel.</summary>
-    public class PixelArtDrawPayload
-    {
-        public string Username { get; set; }
-        public int Row { get; set; }
-        public int Col { get; set; }
-        public int ColorARGB { get; set; }
-        public long Timestamp { get; set; }
-    }
-
-    public class PixelArtSyncPayload
-    {
-        public string RoomCode { get; set; }
-        public int GridSize { get; set; }  // 32 hoặc 64
-        public int[] Grid { get; set; }    // Mảng phẳng [Row * GridSize + Col] = ColorARGB
-    }
 }

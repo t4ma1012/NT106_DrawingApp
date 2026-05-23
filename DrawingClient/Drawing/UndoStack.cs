@@ -1,60 +1,63 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
 
 namespace DrawingClient.Drawing
 {
     public class UndoStack
     {
-        private readonly Stack<Bitmap> _undoHistory = new Stack<Bitmap>();
-        private readonly Stack<Bitmap> _redoHistory = new Stack<Bitmap>();
+        private readonly Stack<Bitmap> _undoStack = new Stack<Bitmap>();
+        private readonly Stack<Bitmap> _redoStack = new Stack<Bitmap>();
 
-        public void Push(Bitmap currentCanvas)
+        public bool CanUndo => _undoStack.Count > 0;
+        public bool CanRedo => _redoStack.Count > 0;
+
+        public void Push(Bitmap current)
         {
-            if (currentCanvas == null)
-                return;
+            if (current == null) return;
 
-            _undoHistory.Push(new Bitmap(currentCanvas));
+            // FIX LỖI GDI+: Tự vẽ lại ảnh thay vì dùng new Bitmap() để tránh lỗi khóa bộ nhớ
+            Bitmap copy = new Bitmap(current.Width, current.Height);
+            using (Graphics g = Graphics.FromImage(copy))
+            {
+                g.DrawImage(current, 0, 0);
+            }
+
+            _undoStack.Push(copy);
             ClearRedo();
         }
 
-        public Bitmap Pop()
+        public Bitmap Undo(Bitmap current)
         {
-            if (_undoHistory.Count > 0) return _undoHistory.Pop();
-            return null;
+            if (!CanUndo) return null;
+
+            Bitmap copy = new Bitmap(current.Width, current.Height);
+            using (Graphics g = Graphics.FromImage(copy)) { g.DrawImage(current, 0, 0); }
+            _redoStack.Push(copy);
+
+            return _undoStack.Pop();
         }
 
-        public Bitmap Undo(Bitmap currentCanvas)
+        public Bitmap Redo(Bitmap current)
         {
-            if (_undoHistory.Count == 0)
-                return null;
+            if (!CanRedo) return null;
 
-            if (currentCanvas != null)
-                _redoHistory.Push(new Bitmap(currentCanvas));
+            Bitmap copy = new Bitmap(current.Width, current.Height);
+            using (Graphics g = Graphics.FromImage(copy)) { g.DrawImage(current, 0, 0); }
+            _undoStack.Push(copy);
 
-            return _undoHistory.Pop();
+            return _redoStack.Pop();
         }
 
-        public Bitmap Redo(Bitmap currentCanvas)
+        private void ClearRedo()
         {
-            if (_redoHistory.Count == 0)
-                return null;
-
-            if (currentCanvas != null)
-                _undoHistory.Push(new Bitmap(currentCanvas));
-
-            return _redoHistory.Pop();
+            while (_redoStack.Count > 0) _redoStack.Pop().Dispose();
         }
 
-        public void ClearRedo()
+        public void ClearAll()
         {
-            while (_redoHistory.Count > 0)
-            {
-                var bmp = _redoHistory.Pop();
-                bmp.Dispose();
-            }
+            while (_undoStack.Count > 0) _undoStack.Pop().Dispose();
+            ClearRedo();
         }
-
-        public bool CanUndo => _undoHistory.Count > 0;
-        public bool CanRedo => _redoHistory.Count > 0;
     }
 }

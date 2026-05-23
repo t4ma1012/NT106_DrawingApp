@@ -13,6 +13,7 @@ namespace DrawingClient.Forms
         private TextBox txtRoomCode;
         private Label lblStatus;
 
+        // ĐÂY CHÍNH LÀ HÀM NHẬN 2 THAM SỐ MÀ VISUAL STUDIO ĐANG TÌM KIẾM NÈ!
         public LobbyForm(ClientNetwork network, string username)
         {
             _network = network;
@@ -78,6 +79,36 @@ namespace DrawingClient.Forms
                 }
 
                 lblStatus.Text = "Đang gửi yêu cầu tham gia...";
+
+                // ✅ FIX RACE CONDITION: Tạo MainForm và subscribe events TRƯỚC khi gửi JOIN_ROOM
+                // Đảm bảo SYNC_BOARD đến sau khi events đã được đăng ký
+                var pendingMainForm = new MainForm(_network, roomCode);
+
+                // Override OnJoinRoomResponse một lần để show form nếu thành công
+                Action<JoinRoomResponse> onceHandler = null;
+                onceHandler = (resp) =>
+                {
+                    NetworkEvents.OnJoinRoomResponse -= onceHandler;
+                    if (resp != null && resp.IsSuccess)
+                    {
+                        this.BeginInvoke(new Action(() =>
+                        {
+                            this.Hide();
+                            pendingMainForm.FormClosed += (fs, fe) => this.Close();
+                            pendingMainForm.Show();
+                        }));
+                    }
+                    else
+                    {
+                        this.BeginInvoke(new Action(() =>
+                        {
+                            pendingMainForm.Dispose();
+                            lblStatus.Text = resp?.Message ?? "Không thể vào phòng";
+                        }));
+                    }
+                };
+                NetworkEvents.OnJoinRoomResponse += onceHandler;
+
                 _network.SendJoinRoom(roomCode);
             };
 
@@ -103,13 +134,13 @@ namespace DrawingClient.Forms
         private void SubscribeEvents()
         {
             NetworkEvents.OnCreateRoomResponse += NetworkEvents_OnCreateRoomResponse;
-            NetworkEvents.OnJoinRoomResponse += NetworkEvents_OnJoinRoomResponse;
+            // OnJoinRoomResponse không subscribe ở đây nữa
+            // vì cả 2 flow (join + create) đều dùng onceHandler riêng
         }
 
         private void LobbyForm_FormClosed(object sender, FormClosedEventArgs e)
         {
             NetworkEvents.OnCreateRoomResponse -= NetworkEvents_OnCreateRoomResponse;
-            NetworkEvents.OnJoinRoomResponse -= NetworkEvents_OnJoinRoomResponse;
         }
 
         private void NetworkEvents_OnCreateRoomResponse(CreateRoomResponse payload)
@@ -124,6 +155,32 @@ namespace DrawingClient.Forms
             {
                 txtRoomCode.Text = payload.RoomCode;
                 lblStatus.Text = $"Đã tạo phòng {payload.RoomCode}, đang vào phòng...";
+
+                // ✅ FIX: Pre-create MainForm trước khi gửi JOIN_ROOM (giống flow join thủ công)
+                var pendingMainForm = new MainForm(_network, payload.RoomCode);
+                Action<JoinRoomResponse> onceHandler = null;
+                onceHandler = (resp) =>
+                {
+                    NetworkEvents.OnJoinRoomResponse -= onceHandler;
+                    if (resp != null && resp.IsSuccess)
+                    {
+                        this.BeginInvoke(new Action(() =>
+                        {
+                            this.Hide();
+                            pendingMainForm.FormClosed += (fs, fe) => this.Close();
+                            pendingMainForm.Show();
+                        }));
+                    }
+                    else
+                    {
+                        this.BeginInvoke(new Action(() =>
+                        {
+                            pendingMainForm.Dispose();
+                            lblStatus.Text = resp?.Message ?? "Không thể vào phòng";
+                        }));
+                    }
+                };
+                NetworkEvents.OnJoinRoomResponse += onceHandler;
                 _network.SendJoinRoom(payload.RoomCode);
             }
             else
@@ -134,6 +191,8 @@ namespace DrawingClient.Forms
 
         private void NetworkEvents_OnJoinRoomResponse(JoinRoomResponse payload)
         {
+            // Handler này chỉ còn dùng cho flow CreateRoom (tự động join sau khi tạo)
+            // Flow JoinRoom thủ công đã dùng onceHandler riêng trong btnJoinRoom.Click
             if (this.IsHandleCreated && this.InvokeRequired)
             {
                 this.BeginInvoke(new Action(() => NetworkEvents_OnJoinRoomResponse(payload)));
