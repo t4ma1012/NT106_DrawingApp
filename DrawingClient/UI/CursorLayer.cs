@@ -9,7 +9,6 @@ namespace DrawingClient.UI
     public class CursorLayer
     {
         private PictureBox _canvas;
-        public Dictionary<string, Point> OtherLasers { get; set; } = new Dictionary<string, Point>();
         private List<EmojiDrop> _emojis = new List<EmojiDrop>();
         private Timer _timer;
 
@@ -23,7 +22,7 @@ namespace DrawingClient.UI
         }
 
         public void UpdateCursor(CursorPayload payload) { }
-        public void RemoveCursor(string username) { OtherLasers.Remove(username); }
+        public void RemoveCursor(string username) { }
         public void AddEmoji(string emoji, Point pos) { _emojis.Add(new EmojiDrop { Text = emoji, Position = pos, Life = 2000 }); }
 
         private void Timer_Tick(object sender, EventArgs e)
@@ -36,12 +35,11 @@ namespace DrawingClient.UI
                 if (_emojis[i].Life <= 0) _emojis.RemoveAt(i);
                 needRedraw = true;
             }
-            if (needRedraw || OtherLasers.Count > 0) _canvas.Invalidate();
+            if (needRedraw) _canvas.Invalidate();
         }
 
         private void Canvas_Paint(object sender, PaintEventArgs e)
         {
-            foreach (var laser in OtherLasers.Values) e.Graphics.FillEllipse(Brushes.Red, laser.X - 5, laser.Y - 5, 10, 10);
             using (Font f = new Font("Segoe UI Emoji", 20))
                 foreach (var em in _emojis) e.Graphics.DrawString(em.Text, f, Brushes.Black, em.Position);
         }

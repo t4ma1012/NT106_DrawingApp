@@ -18,7 +18,7 @@ namespace DrawingClient.Network
 
     public static class LoadBalancerRouteClient
     {
-        public static async Task<ServerRouteInfo> ResolveAsync(string lbHost, int lbPort, int timeoutMs = 2500)
+        public static async Task<ServerRouteInfo> ResolveAsync(string lbHost, int lbPort, int timeoutMs = 2500, string roomCode = "")
         {
             using var tcp = new TcpClient();
             var connectTask = tcp.ConnectAsync(lbHost, lbPort);
@@ -29,7 +29,10 @@ namespace DrawingClient.Network
             stream.ReadTimeout = timeoutMs;
             stream.WriteTimeout = timeoutMs;
 
-            byte[] req = Encoding.ASCII.GetBytes("ROUTE\n");
+            string routeCommand = string.IsNullOrWhiteSpace(roomCode)
+                ? "ROUTE\n"
+                : $"ROUTE room={roomCode.Trim()}\n";
+            byte[] req = Encoding.ASCII.GetBytes(routeCommand);
             await stream.WriteAsync(req, 0, req.Length);
             await stream.FlushAsync();
 

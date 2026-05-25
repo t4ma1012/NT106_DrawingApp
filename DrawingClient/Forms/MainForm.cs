@@ -9,6 +9,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -18,6 +19,7 @@ namespace DrawingClient.Forms
     {
         private readonly ClientNetwork _network;
         private readonly string _roomCode;
+        private bool _isRoomOwner;
         private UdpManager _udpManager;
 
         private DoubleBufferedPictureBox canvas;
@@ -26,40 +28,54 @@ namespace DrawingClient.Forms
         private CursorLayer cursorLayer;
         private Button btnColorPicker;
         private Button btnBackColor;
+        private Button btnBackImage;
         private Button btnClearAll;
+        private Button btnTurnMode;
         private TrackBar tbPenWidth;
         private Label lblPenWidth;
         private ToolTip colorToolTip;
-        private ComboBox cbCanvasSize;
         private ColorDialog colorDialog;
+        private ListBox lstMembers;
         private ListBox lstChat;
         private ListBox lstLogs;
         private TextBox txtChatInput;
-        private ProgressBar gifProgress;
-        private Label lblGifStatus;
         private Label lblFollowState;
         private readonly HashSet<string> locallyShownChat = new HashSet<string>();
         private readonly Queue<string> locallyShownChatOrder = new Queue<string>();
         private readonly HashSet<string> displayedChat = new HashSet<string>();
         private readonly Queue<string> displayedChatOrder = new Queue<string>();
 
+        private const float ZoomStep = 0.2f;
+        private const float ZoomMin = 0.2f;
+        private const float ZoomMax = 4f;
+
         private CanvasManager canvasManager;
         private StickerPickerControl stickerPicker;
         private TurnPanelControl turnPanel;
         private PlaybackPanelControl playbackPanel;
         private readonly Dictionary<string, StickyNoteControl> noteControls = new Dictionary<string, StickyNoteControl>();
+        private string selectedStickyNoteId;
         private string selectedStickerId;
         private bool isPlacingSticker;
         private bool isStickyNoteMode;
         private bool isFollowing;
-        private long lastCursorSend;
-        private long lastLaserSend;
-        private const int CursorSendIntervalMs = 35;
+        private readonly object realtimePointerLock = new object();
+        private CursorPayload pendingCursorPayload;
+        private LaserPayload pendingLaserPayload;
+        private bool hasPendingCursor;
+        private bool hasPendingLaser;
+        private System.Threading.Timer realtimePointerTimer;
+        private int isFlushingRealtimePointers;
+        private const int RealtimePointerFlushIntervalMs = 8;
+        private readonly List<DrawAction> actionHistory = new List<DrawAction>();
+        private readonly HashSet<string> undoneActionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly List<string> ownRedoActionIds = new List<string>();
 
-        public MainForm(ClientNetwork network, string roomCode)
+        public MainForm(ClientNetwork network, string roomCode, bool isRoomOwner = false)
         {
             _network = network;
             _roomCode = roomCode;
+            _isRoomOwner = isRoomOwner;
 
             InitializeUI();
             canvasManager = new CanvasManager(canvas);
@@ -68,6 +84,30 @@ namespace DrawingClient.Forms
             SetupUdp();
 
             this.FormClosed += MainForm_FormClosed;
+        }
+
+        public void RegisterUdpEndpoint()
+        {
+            _ = RegisterUdpEndpointBurstAsync();
+        }
+
+        private async Task RegisterUdpEndpointBurstAsync()
+        {
+            for (int i = 0; i < 5; i++)
+            {
+                _udpManager?.RegisterEndpoint(_network?.CurrentUsername, _roomCode);
+                await Task.Delay(250);
+            }
+        }
+
+        public void SetRoomOwner(bool isRoomOwner)
+        {
+            _isRoomOwner = isRoomOwner;
+            if (btnTurnMode != null)
+                btnTurnMode.Visible = _isRoomOwner;
+
+            if (turnPanel != null)
+                turnPanel.SetState(turnPanel.IsEnabled, turnPanel.ActiveUser, _isRoomOwner);
         }
 
         private void ConfigureCanvasManager()
@@ -79,26 +119,13 @@ namespace DrawingClient.Forms
                 ToastForm.ShowToast(this, "Đã hút màu");
             };
 
-            canvasManager.OnNetworkDrawAction = (p1, p2, color, width) =>
+            canvasManager.OnNetworkDrawAction = payload =>
             {
-                if (_udpManager == null)
+                if (payload == null)
                     return;
-
-                DrawPayload payload = new DrawPayload
-                {
-                    ActionID = Guid.NewGuid().ToString(),
-                    Username = _network?.CurrentUsername,
-                    ToolType = canvasManager.CurrentTool.ToString(),
-                    X1 = p1.X,
-                    Y1 = p1.Y,
-                    X2 = p2.X,
-                    Y2 = p2.Y,
-                    ColorARGB = color.ToArgb(),
-                    Thickness = width,
-                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                };
-
-                _udpManager.SendDraw(payload);
+                payload.Username = _network?.CurrentUsername;
+                RecordAction(ToDrawAction(payload), true);
+                _network?.SendDrawRealtime(payload);
             };
 
             canvasManager.OnClaimAreaSelected = rect =>
@@ -119,18 +146,40 @@ namespace DrawingClient.Forms
 
             canvasManager.OnNetworkFloodFillAction = payload =>
             {
-                if (_udpManager == null || payload == null)
+                if (payload == null)
                     return;
                 payload.Username = _network.CurrentUsername;
-                _udpManager.SendFloodFill(payload);
+                RecordAction(ToDrawAction(payload), true);
+                _network?.SendFloodFillRealtime(payload);
             };
 
             canvasManager.OnNetworkTextAction = payload =>
             {
-                if (_udpManager == null || payload == null)
+                if (payload == null)
                     return;
                 payload.Username = _network.CurrentUsername;
-                _udpManager.SendDraw(payload);
+                RecordAction(ToDrawAction(payload), true);
+                _network?.SendTextRealtime(payload);
+            };
+
+            canvasManager.OnNetworkImportImageAction = payload =>
+            {
+                if (payload == null)
+                    return;
+
+                payload.Username = _network.CurrentUsername;
+                RecordAction(ToDrawAction(payload), true);
+                _network?.Send(CommandType.IMPORT_IMAGE, payload);
+            };
+
+            canvasManager.OnNetworkStickerAction = payload =>
+            {
+                if (payload == null)
+                    return;
+
+                payload.Username = _network.CurrentUsername;
+                RecordAction(ToDrawAction(payload), true);
+                _network?.SendSticker(payload);
             };
         }
 
@@ -138,6 +187,12 @@ namespace DrawingClient.Forms
         {
             try
             {
+                if (_network?.PreferTcpRealtime == true)
+                {
+                    AppendLog("UDP bo qua trong che do LB relay; cursor/laser dung TCP.");
+                    return;
+                }
+
                 string serverIp = string.IsNullOrWhiteSpace(_network?.ServerIp) ? "127.0.0.1" : _network.ServerIp;
                 _udpManager = new UdpManager(serverIp, _network?.ServerUdpPort ?? 8889);
                 _udpManager.Start();
@@ -154,6 +209,7 @@ namespace DrawingClient.Forms
         private void SubscribeNetworkEvents()
         {
             NetworkEvents.OnCursorReceived += NetworkEvents_OnCursorReceived;
+            NetworkEvents.OnRoomMembersReceived += NetworkEvents_OnRoomMembersReceived;
             NetworkEvents.OnUserJoined += NetworkEvents_OnUserJoined;
             NetworkEvents.OnUserLeft += NetworkEvents_OnUserLeft;
             NetworkEvents.OnDrawReceived += NetworkEvents_OnDrawReceived;
@@ -174,12 +230,14 @@ namespace DrawingClient.Forms
             NetworkEvents.OnFollowModeReceived += NetworkEvents_OnFollowModeReceived;
             NetworkEvents.OnTurnBasedReceived += NetworkEvents_OnTurnBasedReceived;
             NetworkEvents.OnSaveGalleryResponse += NetworkEvents_OnSaveGalleryResponse;
-            NetworkEvents.OnGifExportProgress += NetworkEvents_OnGifExportProgress;
+            NetworkEvents.OnAiTextToImageResult += NetworkEvents_OnAiTextToImageResult;
+            NetworkEvents.OnAiBgRemovedResult += NetworkEvents_OnAiBgRemovedResult;
         }
 
         private void MainForm_FormClosed(object sender, FormClosedEventArgs e)
         {
             NetworkEvents.OnCursorReceived -= NetworkEvents_OnCursorReceived;
+            NetworkEvents.OnRoomMembersReceived -= NetworkEvents_OnRoomMembersReceived;
             NetworkEvents.OnUserJoined -= NetworkEvents_OnUserJoined;
             NetworkEvents.OnUserLeft -= NetworkEvents_OnUserLeft;
             NetworkEvents.OnDrawReceived -= NetworkEvents_OnDrawReceived;
@@ -200,18 +258,59 @@ namespace DrawingClient.Forms
             NetworkEvents.OnFollowModeReceived -= NetworkEvents_OnFollowModeReceived;
             NetworkEvents.OnTurnBasedReceived -= NetworkEvents_OnTurnBasedReceived;
             NetworkEvents.OnSaveGalleryResponse -= NetworkEvents_OnSaveGalleryResponse;
-            NetworkEvents.OnGifExportProgress -= NetworkEvents_OnGifExportProgress;
+            NetworkEvents.OnAiTextToImageResult -= NetworkEvents_OnAiTextToImageResult;
+            NetworkEvents.OnAiBgRemovedResult -= NetworkEvents_OnAiBgRemovedResult;
+            StopRealtimePointerTimer();
             _udpManager?.Stop();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                StopRealtimePointerTimer();
+                _udpManager?.Stop();
+            }
+
+            base.Dispose(disposing);
+        }
+
+        private void StopRealtimePointerTimer()
+        {
+            var timer = realtimePointerTimer;
+            realtimePointerTimer = null;
+            if (timer == null)
+                return;
+
+            try { timer.Change(Timeout.Infinite, Timeout.Infinite); } catch { }
+            timer.Dispose();
         }
 
         private void InitializeUI()
         {
             this.Text = string.IsNullOrWhiteSpace(_roomCode) ? "Draw Together" : $"Draw Together - Room {_roomCode}";
             this.Size = new Size(1360, 840);
+            this.MinimumSize = new Size(1024, 700);
             this.StartPosition = FormStartPosition.CenterScreen;
+            this.Font = new Font("Segoe UI", 9F);
 
-            toolPanel = new Panel { Dock = DockStyle.Left, Width = 240, BackColor = Color.LightGray, AutoScroll = true };
-            userPanel = new Panel { Dock = DockStyle.Right, Width = 330, BackColor = Color.LightGray };
+            toolPanel = new Panel
+            {
+                Dock = DockStyle.Left,
+                Width = 270,
+                BackColor = Color.FromArgb(245, 246, 248),
+                AutoScroll = true,
+                BorderStyle = BorderStyle.FixedSingle,
+                Padding = new Padding(10)
+            };
+            userPanel = new Panel
+            {
+                Dock = DockStyle.Right,
+                Width = 340,
+                BackColor = Color.FromArgb(245, 246, 248),
+                BorderStyle = BorderStyle.FixedSingle,
+                Padding = new Padding(6)
+            };
             canvas = new DoubleBufferedPictureBox { Dock = DockStyle.Fill, BackColor = Color.White };
 
             colorDialog = new ColorDialog();
@@ -225,13 +324,19 @@ namespace DrawingClient.Forms
             this.KeyDown += MainForm_KeyDown;
             this.KeyUp += MainForm_KeyUp;
 
+            canvas.TabStop = true;
+            canvas.MouseEnter += (s, e) => canvas.Focus();
+            canvas.MouseWheel += Canvas_MouseWheel;
+
             canvas.MouseMove += Canvas_MouseMove_SendCursor;
             canvas.MouseDown += Canvas_MouseDown_Custom;
             canvas.MouseMove += Canvas_MouseMove_Custom;
             canvas.MouseUp += Canvas_MouseUp_Custom;
             canvas.Paint += Canvas_Paint_Custom;
 
+            realtimePointerTimer = new System.Threading.Timer(_ => FlushRealtimePointerState(), null, 0, RealtimePointerFlushIntervalMs);
             cursorLayer = new CursorLayer(canvas);
+            this.Shown += (s, e) => canvasManager?.FitToViewport();
         }
 
         private void BuildToolPanel()
@@ -264,85 +369,74 @@ namespace DrawingClient.Forms
                     canvasManager.ChangeBackgroundColor(colorDialog.Color);
                     var payload = new SetBackgroundPayload
                     {
-                        ActionID = Guid.NewGuid().ToString(),
-                        RoomCode = _roomCode,
-                        Username = _network.CurrentUsername,
-                        ColorARGB = colorDialog.Color.ToArgb(),
-                        Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                    };
+                    ActionID = Guid.NewGuid().ToString(),
+                    RoomCode = _roomCode,
+                    Username = _network.CurrentUsername,
+                    ColorARGB = colorDialog.Color.ToArgb(),
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+                    RecordAction(ToDrawAction(payload), true);
                     _network?.Send(CommandType.SET_BACKGROUND, payload);
-                    _udpManager?.SendSetBackground(payload);
+                    if (_network?.PreferTcpRealtime != true)
+                        _udpManager?.SendSetBackground(payload);
                     colorToolTip.SetToolTip(btnBackColor, $"Mã màu: #{colorDialog.Color.R:X2}{colorDialog.Color.G:X2}{colorDialog.Color.B:X2}");
                 }
             };
+
+            btnBackImage = new Button { Text = "Anh nen", Location = new Point(10, 145), Size = new Size(200, 30) };
+            btnBackImage.Click += BtnBackImage_Click;
 
             btnClearAll = new Button { Text = "Xóa toàn bộ", Location = new Point(10, 145), Size = new Size(200, 30) };
             btnClearAll.Click += (s, e) =>
             {
                 if (!EnsureCanDraw()) return;
                 canvasManager.ClearAll();
+                actionHistory.Clear();
+                undoneActionIds.Clear();
+                ownRedoActionIds.Clear();
                 _network?.SendEmpty(CommandType.CLEAR_ALL);
             };
 
-            cbCanvasSize = new ComboBox { Location = new Point(10, 180), Size = new Size(200, 30), DropDownStyle = ComboBoxStyle.DropDownList };
-            cbCanvasSize.Items.AddRange(new object[] { "800x600", "1280x720", "1920x1080" });
-            cbCanvasSize.SelectedIndex = 1;
-            cbCanvasSize.SelectedIndexChanged += (s, e) =>
-            {
-                string[] dims = cbCanvasSize.SelectedItem.ToString().Split('x');
-                canvasManager.ResizeCanvas(int.Parse(dims[0]), int.Parse(dims[1]));
-            };
-
-            Button btnUndo = new Button { Text = "Hoàn tác (Ctrl+Z)", Location = new Point(10, 220), Size = new Size(200, 30) };
+            Button btnUndo = new Button { Text = "Hoàn tác (Ctrl+Z)", Location = new Point(10, 180), Size = new Size(200, 30) };
             btnUndo.Click += (s, e) =>
             {
                 if (!EnsureCanDraw()) return;
-                canvasManager.Undo();
-                _network?.SendUndo(Guid.NewGuid().ToString());
+                UndoOwnLastAction();
             };
 
-            Button btnRedo = new Button { Text = "Làm lại (Ctrl+Y)", Location = new Point(10, 255), Size = new Size(200, 30) };
+            Button btnRedo = new Button { Text = "Làm lại (Ctrl+Y)", Location = new Point(10, 215), Size = new Size(200, 30) };
             btnRedo.Click += (s, e) =>
             {
                 if (!EnsureCanDraw()) return;
-                canvasManager.Redo();
-                _network?.SendRedo(Guid.NewGuid().ToString());
+                RedoOwnLastAction();
             };
 
-            Button btnImport = new Button { Text = "Nhập ảnh", Location = new Point(10, 290), Size = new Size(200, 30) };
+            Button btnImport = new Button { Text = "Nhập ảnh", Location = new Point(10, 250), Size = new Size(200, 30) };
             btnImport.Click += BtnImport_Click;
 
-            Button btnExport = new Button { Text = "Xuất ảnh", Location = new Point(10, 325), Size = new Size(200, 30) };
+            Button btnExport = new Button { Text = "Xuất ảnh", Location = new Point(10, 285), Size = new Size(200, 30) };
             btnExport.Click += BtnExport_Click;
 
-            Button btnExportGif = new Button { Text = "Xuất GIF", Location = new Point(10, 360), Size = new Size(200, 30) };
-            btnExportGif.Click += (s, e) =>
-            {
-                gifProgress.Value = 0;
-                lblGifStatus.Text = "GIF: Đang yêu cầu...";
-                _network?.SendExportGifRequest();
-            };
-
-            Button btnGallery = new Button { Text = "Gallery", Location = new Point(10, 395), Size = new Size(200, 30) };
+            Button btnGallery = new Button { Text = "Gallery", Location = new Point(10, 355), Size = new Size(200, 30) };
             btnGallery.Click += (s, e) => new GalleryForm(_network).Show(this);
 
-            Button btnSaveGallery = new Button { Text = "Lưu vào Gallery", Location = new Point(10, 430), Size = new Size(200, 30) };
+            Button btnSaveGallery = new Button { Text = "Lưu vào Gallery", Location = new Point(10, 390), Size = new Size(200, 30) };
             btnSaveGallery.Click += (s, e) => SaveCurrentCanvasToGallery();
 
-            Button btnAiTextToDrawing = new Button { Text = "AI: Text-to-Drawing", Location = new Point(10, 465), Size = new Size(200, 30), BackColor = Color.Honeydew };
+            Button btnAiTextToDrawing = new Button { Text = "AI: Text-to-Drawing", Location = new Point(10, 425), Size = new Size(200, 30), BackColor = Color.Honeydew };
             btnAiTextToDrawing.Click += BtnAiTextToDrawing_Click;
 
-            Button btnAiRemoveBg = new Button { Text = "AI: Xóa nền ảnh", Location = new Point(10, 500), Size = new Size(200, 30), BackColor = Color.Honeydew };
+            Button btnAiRemoveBg = new Button { Text = "AI: Xóa nền ảnh", Location = new Point(10, 460), Size = new Size(200, 30), BackColor = Color.Honeydew };
             btnAiRemoveBg.Click += BtnAiRemoveBackground_Click;
 
             Button btnZoomIn = new Button { Text = "Zoom +", Location = new Point(10, 535), Size = new Size(95, 30) };
-            btnZoomIn.Click += (s, e) => { canvasManager.ZoomFactor = Math.Min(4f, canvasManager.ZoomFactor + 0.2f); canvas.Invalidate(); };
+            btnZoomIn.Click += (s, e) => AdjustCanvasZoom(ZoomStep);
             Button btnZoomOut = new Button { Text = "Zoom -", Location = new Point(115, 535), Size = new Size(95, 30) };
-            btnZoomOut.Click += (s, e) => { canvasManager.ZoomFactor = Math.Max(0.2f, canvasManager.ZoomFactor - 0.2f); canvas.Invalidate(); };
+            btnZoomOut.Click += (s, e) => AdjustCanvasZoom(-ZoomStep);
 
             ComboBox cbTools = new ComboBox { Location = new Point(10, 570), Size = new Size(200, 30), DropDownStyle = ComboBoxStyle.DropDownList };
             cbTools.Items.AddRange(Enum.GetNames(typeof(ToolType)));
-            cbTools.SelectedIndex = 0;
+            cbTools.SelectedItem = ToolType.Pen.ToString();
             cbTools.SelectedIndexChanged += (s, e) => canvasManager.CurrentTool = (ToolType)cbTools.SelectedIndex;
 
             Button btnStickerMode = new Button { Text = "Đặt sticker", Location = new Point(10, 605), Size = new Size(200, 30) };
@@ -378,9 +472,16 @@ namespace DrawingClient.Forms
                 lblFollowState.Text = isFollowing ? $"Đang follow: {txtFollowTarget.Text.Trim()}" : "Follow: OFF";
             };
 
-            Button btnTurnMode = new Button { Text = "Bật/Tắt vẽ theo lượt", Location = new Point(10, 810), Size = new Size(200, 30) };
+            btnTurnMode = new Button { Text = "Bật/Tắt vẽ theo lượt", Location = new Point(10, 810), Size = new Size(200, 30) };
+            btnTurnMode.Visible = _isRoomOwner;
             btnTurnMode.Click += (s, e) =>
             {
+                if (!_isRoomOwner)
+                {
+                    ToastForm.ShowToast(this, "Chỉ chủ phòng mới được bật/tắt vẽ theo lượt");
+                    return;
+                }
+
                 bool enable = !turnPanel.IsEnabled;
                 var payload = new TurnBasedPayload
                 {
@@ -394,8 +495,6 @@ namespace DrawingClient.Forms
                 _udpManager?.SendTurnBased(payload);
             };
 
-            gifProgress = new ProgressBar { Location = new Point(10, 845), Size = new Size(200, 16), Minimum = 0, Maximum = 100 };
-            lblGifStatus = new Label { Location = new Point(10, 865), Size = new Size(220, 26), Text = "GIF: sẵn sàng" };
             lblFollowState = new Label { Location = new Point(10, 895), Size = new Size(220, 26), Text = "Follow: OFF" };
 
             Button btnLeaveRoom = new Button { Text = "Rời phòng", Location = new Point(10, 930), Size = new Size(200, 30), BackColor = Color.LightCoral };
@@ -408,33 +507,143 @@ namespace DrawingClient.Forms
                 this.Hide();
             };
 
-            Button btnToggleChat = new Button { Text = "Ẩn/Hiện Chat", Location = new Point(10, 965), Size = new Size(200, 30), BackColor = Color.LightBlue };
+            Button btnToggleChat = new Button { Text = "Ẩn/Hiện khung phải", Location = new Point(10, 965), Size = new Size(200, 30), BackColor = Color.LightBlue };
             btnToggleChat.Click += (s, e) =>
             {
                 userPanel.Visible = !userPanel.Visible;
+                canvasManager?.FitToViewport();
             };
+
+            Label lblDrawingHeader = CreateToolHeader("Vẽ");
+            Label lblHistoryHeader = CreateToolHeader("Lịch sử");
+            Label lblFileHeader = CreateToolHeader("Tệp và thư viện");
+            Label lblAiHeader = CreateToolHeader("AI");
+            Label lblCollabHeader = CreateToolHeader("Cộng tác");
+            int y = 12;
+
+            y = PlaceToolHeader(lblDrawingHeader, y);
+            y = PlaceToolControl(cbTools, y);
+            y = PlaceToolControl(btnColorPicker, y);
+            y = PlaceToolControl(btnBackColor, y);
+            y = PlaceToolControl(btnBackImage, y);
+            y = PlaceToolPair(tbPenWidth, lblPenWidth, y, 146, 74, 45);
+            y = PlaceToolPair(btnZoomIn, btnZoomOut, y, 108, 108);
+            y = PlaceToolControl(btnClearAll, y);
+
+            y = PlaceToolHeader(lblHistoryHeader, y + 4);
+            y = PlaceToolPair(btnUndo, btnRedo, y, 108, 108);
+
+            y = PlaceToolHeader(lblFileHeader, y + 4);
+            y = PlaceToolControl(btnImport, y);
+            y = PlaceToolControl(btnExport, y);
+            y = PlaceToolPair(btnGallery, btnSaveGallery, y, 108, 108);
+
+            y = PlaceToolHeader(lblAiHeader, y + 4);
+            y = PlaceToolControl(btnAiTextToDrawing, y);
+            y = PlaceToolControl(btnAiRemoveBg, y);
+            y = PlaceToolHeader(lblCollabHeader, y + 4);
+            y = PlaceToolControl(btnStickerMode, y);
+            y = PlaceToolControl(stickerPicker, y, 94);
+            y = PlaceToolControl(btnStickyNote, y);
+            y = PlaceToolPair(txtFollowTarget, btnFollow, y, 146, 74);
+            y = PlaceToolControl(lblFollowState, y, 24);
+            y = PlaceToolControl(btnTurnMode, y);
+            y = PlaceToolControl(btnLeaveRoom, y);
+            y = PlaceToolControl(btnToggleChat, y);
 
             toolPanel.Controls.AddRange(new Control[]
             {
-                btnColorPicker, tbPenWidth, btnBackColor, btnClearAll, cbCanvasSize,
-                btnUndo, btnRedo, btnImport, btnExport, btnExportGif, btnGallery, btnSaveGallery,
+                lblDrawingHeader, lblHistoryHeader, lblFileHeader, lblAiHeader, lblCollabHeader,
+                btnColorPicker, tbPenWidth, btnBackColor, btnBackImage, btnClearAll,
+                btnUndo, btnRedo, btnImport, btnExport, btnGallery, btnSaveGallery,
                 btnAiTextToDrawing, btnAiRemoveBg, lblPenWidth, btnZoomIn, btnZoomOut, cbTools, btnStickerMode, stickerPicker,
-                btnStickyNote, txtFollowTarget, btnFollow, btnTurnMode, gifProgress,
-                lblGifStatus, lblFollowState, btnLeaveRoom, btnToggleChat
+                btnStickyNote, txtFollowTarget, btnFollow, btnTurnMode,
+                lblFollowState, btnLeaveRoom, btnToggleChat
             });
+            NormalizeToolPanelControls();
+        }
+
+        private Label CreateToolHeader(string text)
+        {
+            return new Label
+            {
+                Text = text,
+                Height = 24,
+                ForeColor = Color.FromArgb(45, 52, 64),
+                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+        }
+
+        private int PlaceToolHeader(Control control, int y)
+        {
+            control.Location = new Point(12, y);
+            control.Size = new Size(226, 24);
+            return y + 28;
+        }
+
+        private int PlaceToolControl(Control control, int y, int height = 32)
+        {
+            control.Location = new Point(12, y);
+            control.Size = new Size(226, height);
+            return y + height + 7;
+        }
+
+        private int PlaceToolPair(Control left, Control right, int y, int leftWidth, int rightWidth, int height = 32)
+        {
+            left.Location = new Point(12, y);
+            left.Size = new Size(leftWidth, height);
+            right.Location = new Point(12 + leftWidth + 6, y);
+            right.Size = new Size(rightWidth, height);
+            return y + height + 7;
+        }
+
+        private void NormalizeToolPanelControls()
+        {
+            foreach (Control control in toolPanel.Controls)
+            {
+                control.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+                control.Margin = new Padding(0, 0, 0, 6);
+            }
+
+            foreach (Control control in toolPanel.Controls)
+            {
+                var button = control as Button;
+                if (button == null)
+                    continue;
+
+                button.FlatStyle = FlatStyle.System;
+                button.TextAlign = ContentAlignment.MiddleCenter;
+            }
+
+            toolPanel.AutoScrollMargin = new Size(0, 16);
+        }
+
+        private void AdjustCanvasZoom(float delta, Point? pivot = null)
+        {
+            if (canvasManager == null)
+                return;
+
+            Point zoomPivot = pivot ?? new Point(canvas.ClientSize.Width / 2, canvas.ClientSize.Height / 2);
+            canvasManager.ZoomAt(zoomPivot, delta);
         }
 
         private void BuildUserPanel()
         {
             turnPanel = new TurnPanelControl { Dock = DockStyle.Top };
+            turnPanel.NextTurnRequested += HandleNextTurnRequested;
             playbackPanel = new PlaybackPanelControl { Dock = DockStyle.Top };
 
             // FIX LỖI: Dùng hàm Send tổng quát
             playbackPanel.RequestPlayback += () => _network?.Send(CommandType.REQUEST_PLAYBACK, new PlaybackRequestPayload { RoomCode = _roomCode });
 
             TabControl tabs = new TabControl { Dock = DockStyle.Fill };
+            TabPage tabMembers = new TabPage("Members");
             TabPage tabChat = new TabPage("Chat");
             TabPage tabLogs = new TabPage("Nhật ký");
+
+            lstMembers = new ListBox { Dock = DockStyle.Fill };
+            tabMembers.Controls.Add(lstMembers);
 
             lstChat = new ListBox { Dock = DockStyle.Fill };
             Panel chatBottom = new Panel { Dock = DockStyle.Bottom, Height = 40 };
@@ -458,6 +667,7 @@ namespace DrawingClient.Forms
             lstLogs = new ListBox { Dock = DockStyle.Fill };
             tabLogs.Controls.Add(lstLogs);
 
+            tabs.TabPages.Add(tabMembers);
             tabs.TabPages.Add(tabChat);
             tabs.TabPages.Add(tabLogs);
 
@@ -468,36 +678,125 @@ namespace DrawingClient.Forms
 
         private void Canvas_MouseMove_SendCursor(object sender, MouseEventArgs e)
         {
-            if (_udpManager == null || string.IsNullOrWhiteSpace(_network?.CurrentUsername))
+            if (string.IsNullOrWhiteSpace(_network?.CurrentUsername))
                 return;
 
-            long now = Environment.TickCount;
-            if (now - lastCursorSend >= CursorSendIntervalMs)
+            Point canvasPoint = canvasManager?.ScreenToCanvas(e.Location) ?? e.Location;
+            QueueRealtimeCursor(new CursorPayload
             {
-                lastCursorSend = now;
-                _udpManager.SendCursor(new CursorPayload
-                {
-                    Username = _network.CurrentUsername,
-                    X = e.X,
-                    Y = e.Y
-                });
-            }
+                Username = _network.CurrentUsername,
+                X = canvasPoint.X,
+                Y = canvasPoint.Y
+            });
 
-            if ((ModifierKeys & Keys.Alt) == Keys.Alt && now - lastLaserSend >= CursorSendIntervalMs)
+            if ((ModifierKeys & Keys.Alt) == Keys.Alt)
             {
-                lastLaserSend = now;
-                _udpManager.SendLaser(new LaserPayload
+                QueueRealtimeLaser(new LaserPayload
                 {
                     Username = _network.CurrentUsername,
-                    X = e.X,
-                    Y = e.Y,
+                    X = canvasPoint.X,
+                    Y = canvasPoint.Y,
                     IsActive = true
                 });
             }
         }
 
+        private void QueueRealtimeCursor(CursorPayload payload)
+        {
+            if (payload == null)
+                return;
+
+            lock (realtimePointerLock)
+            {
+                pendingCursorPayload = payload;
+                hasPendingCursor = true;
+            }
+        }
+
+        private void QueueRealtimeLaser(LaserPayload payload)
+        {
+            if (payload == null)
+                return;
+
+            lock (realtimePointerLock)
+            {
+                pendingLaserPayload = payload;
+                hasPendingLaser = true;
+            }
+        }
+
+        private void FlushRealtimePointerState()
+        {
+            if (Interlocked.Exchange(ref isFlushingRealtimePointers, 1) == 1)
+                return;
+
+            try
+            {
+                CursorPayload cursor = null;
+                LaserPayload laser = null;
+
+                lock (realtimePointerLock)
+                {
+                    if (hasPendingCursor)
+                    {
+                        cursor = pendingCursorPayload;
+                        hasPendingCursor = false;
+                    }
+
+                    if (hasPendingLaser)
+                    {
+                        laser = pendingLaserPayload;
+                        hasPendingLaser = false;
+                    }
+                }
+
+                if (cursor != null)
+                    SendCursorRealtime(cursor);
+
+                if (laser != null)
+                    SendLaserRealtime(laser);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref isFlushingRealtimePointers, 0);
+            }
+        }
+
+        private void SendCursorRealtime(CursorPayload payload)
+        {
+            if (payload == null)
+                return;
+            if (string.IsNullOrWhiteSpace(payload.Username))
+                payload.Username = _network?.CurrentUsername;
+            if (string.IsNullOrWhiteSpace(payload.Username))
+                return;
+
+            if (_udpManager != null && _network?.PreferTcpRealtime != true)
+                _udpManager.SendCursor(payload);
+            else
+                _network?.SendCursorRealtime(payload);
+        }
+
+        private void SendLaserRealtime(LaserPayload payload)
+        {
+            if (payload == null)
+                return;
+            if (string.IsNullOrWhiteSpace(payload.Username))
+                payload.Username = _network?.CurrentUsername;
+            if (string.IsNullOrWhiteSpace(payload.Username))
+                return;
+
+            if (_udpManager != null && _network?.PreferTcpRealtime != true)
+                _udpManager.SendLaser(payload);
+            else
+                _network?.SendLaserRealtime(payload);
+        }
+
         private void Canvas_MouseDown_Custom(object sender, MouseEventArgs e)
         {
+            canvas.Focus();
+            SelectStickyNote(null);
+
             if (e.Button != MouseButtons.Left) return;
 
             if (isPlacingSticker || pendingImportImage != null)
@@ -510,9 +809,11 @@ namespace DrawingClient.Forms
                 string noteId = Guid.NewGuid().ToString();
                 var note = new StickyNoteControl { NoteId = noteId, Author = _network?.CurrentUsername, Location = e.Location };
                 note.NoteChanged += StickyNoteChanged;
+                note.NoteSelected += StickyNoteSelected;
                 canvas.Controls.Add(note);
                 note.BringToFront();
                 noteControls[noteId] = note;
+                SelectStickyNote(note);
 
                 _network?.SendStickyNote(new StickyNotePayload
                 {
@@ -520,6 +821,8 @@ namespace DrawingClient.Forms
                     AuthorUsername = _network?.CurrentUsername,
                     X = e.X,
                     Y = e.Y,
+                    Width = note.Width,
+                    Height = note.Height,
                     Text = note.NoteText,
                     IsOpen = true,
                     Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
@@ -565,7 +868,8 @@ namespace DrawingClient.Forms
 
                 canvasManager.AddSticker(payload);
                 _network?.SendSticker(payload);
-                _udpManager?.SendSticker(payload);
+                if (_network?.PreferTcpRealtime != true)
+                    _udpManager?.SendSticker(payload);
 
                 isPlacingSticker = false;
                 canvas.Invalidate();
@@ -582,28 +886,12 @@ namespace DrawingClient.Forms
                 int y = Math.Min(start.Y, end.Y);
                 Rectangle target = new Rectangle(x, y, width, height);
 
-                canvasManager.ImportImage(pendingImportImage, target);
-
-                using (MemoryStream ms = new MemoryStream())
-                {
-                    pendingImportImage.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-                    string base64 = Convert.ToBase64String(ms.ToArray());
-
-                    _network?.Send(CommandType.IMPORT_IMAGE, new ImportImagePayload
-                    {
-                        ActionID = Guid.NewGuid().ToString(),
-                        Username = _network.CurrentUsername,
-                        X = target.X,
-                        Y = target.Y,
-                        Width = target.Width,
-                        Height = target.Height,
-                        ImageData = base64,
-                        Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                    });
-                }
+                ImportImageAndBroadcast(pendingImportImage, target, pendingImportAiType, pendingImportPrompt);
 
                 pendingImportImage.Dispose();
                 pendingImportImage = null;
+                pendingImportAiType = null;
+                pendingImportPrompt = null;
                 canvas.Invalidate();
             }
         }
@@ -633,14 +921,93 @@ namespace DrawingClient.Forms
                 AuthorUsername = _network.CurrentUsername,
                 X = note.Left,
                 Y = note.Top,
+                Width = note.Width,
+                Height = note.Height,
                 Text = note.NoteText,
                 IsOpen = true,
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             });
         }
 
+        private void StickyNoteSelected(StickyNoteControl note)
+        {
+            SelectStickyNote(note);
+        }
+
+        private void SelectStickyNote(StickyNoteControl note)
+        {
+            selectedStickyNoteId = note?.NoteId;
+            foreach (var pair in noteControls)
+            {
+                bool isSelected = note != null && string.Equals(pair.Key, selectedStickyNoteId, StringComparison.OrdinalIgnoreCase);
+                pair.Value.SetSelected(isSelected);
+            }
+        }
+
+        private bool DeleteSelectedStickyNote()
+        {
+            if (string.IsNullOrWhiteSpace(selectedStickyNoteId))
+                return false;
+
+            if (!noteControls.TryGetValue(selectedStickyNoteId, out var note))
+            {
+                selectedStickyNoteId = null;
+                return false;
+            }
+
+            string noteId = selectedStickyNoteId;
+            selectedStickyNoteId = null;
+            noteControls.Remove(noteId);
+            canvas.Controls.Remove(note);
+            note.Dispose();
+
+            _network?.SendStickyNote(new StickyNotePayload
+            {
+                NoteID = noteId,
+                AuthorUsername = _network.CurrentUsername,
+                IsOpen = false,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            });
+
+            return true;
+        }
+
         private Image pendingImportImage;
+        private string pendingImportAiType;
+        private string pendingImportPrompt;
         private Point dragStartPoint;
+
+        private void BtnBackImage_Click(object sender, EventArgs e)
+        {
+            if (!EnsureCanDraw()) return;
+
+            using (OpenFileDialog openFileDialog = new OpenFileDialog())
+            {
+                openFileDialog.Filter = "Image files|*.png;*.jpg;*.jpeg;*.bmp";
+                if (openFileDialog.ShowDialog() != DialogResult.OK)
+                    return;
+
+                using (Image image = Image.FromFile(openFileDialog.FileName))
+                {
+                    string imageData = EncodeBackgroundImageForNetwork(image);
+                    canvasManager.ChangeBackgroundImage(image);
+
+                    var payload = new SetBackgroundPayload
+                    {
+                        ActionID = Guid.NewGuid().ToString(),
+                        RoomCode = _roomCode,
+                        Username = _network.CurrentUsername,
+                        ColorARGB = canvasManager.BackgroundColor.ToArgb(),
+                        ImageData = imageData,
+                        Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                    };
+
+                    RecordAction(ToDrawAction(payload), true);
+                    _network?.Send(CommandType.SET_BACKGROUND, payload);
+                    ToastForm.ShowToast(this, "Da dat anh nen canvas");
+                }
+            }
+        }
 
         private void BtnImport_Click(object sender, EventArgs e)
         {
@@ -654,6 +1021,8 @@ namespace DrawingClient.Forms
 
                 if (pendingImportImage != null) pendingImportImage.Dispose();
                 pendingImportImage = Image.FromFile(openFileDialog.FileName);
+                pendingImportAiType = null;
+                pendingImportPrompt = null;
                 isStickyNoteMode = false;
                 isPlacingSticker = false;
                 ToastForm.ShowToast(this, "Kéo thả chuột trên Canvas để chọn kích cỡ ảnh");
@@ -677,9 +1046,9 @@ namespace DrawingClient.Forms
         private async void BtnAiTextToDrawing_Click(object sender, EventArgs e)
         {
             if (!EnsureCanDraw()) return;
-            if (!ApiConfig.IsGeminiConfigured())
+            if (!ApiConfig.IsHuggingFaceConfigured())
             {
-                MessageBox.Show("Chua cau hinh GEMINI_API_KEY trong .env.", "Thieu API key");
+                MessageBox.Show("Chua cau hinh HF_TOKEN trong .env.", "Thieu API key");
                 return;
             }
 
@@ -689,14 +1058,14 @@ namespace DrawingClient.Forms
 
             await RunButtonTaskAsync(sender as Button, "AI đang tạo ảnh...", async () =>
             {
-                byte[] imageBytes = await GeminiClient.GenerateImageAsync(prompt.Trim());
+                byte[] imageBytes = await StabilityAiClient.GenerateImageAsync(prompt.Trim());
                 if (imageBytes == null || imageBytes.Length == 0)
-                    throw new InvalidOperationException("Gemini khong tra ve anh.");
+                    throw new InvalidOperationException("Hugging Face khong tra ve anh.");
 
                 using (Image aiImage = CreateImageFromBytes(imageBytes))
                 {
                     Rectangle target = BuildCenteredImageTarget(aiImage.Size);
-                    ImportImageAndBroadcast(aiImage, target);
+                    ImportImageAndBroadcast(aiImage, target, "text_to_image", prompt.Trim());
                 }
 
                 ToastForm.ShowToast(this, "Đã thêm ảnh AI vào canvas");
@@ -709,6 +1078,12 @@ namespace DrawingClient.Forms
             if (!ApiConfig.IsRemoveBgConfigured())
             {
                 MessageBox.Show("Chua cau hinh REMOVE_BG_API_KEY trong .env.", "Thieu API key");
+                return;
+            }
+
+            if (canvasManager.TryGetSelectedImagePayload(out var selectedImage))
+            {
+                await RemoveBackgroundFromCanvasImageAsync(sender as Button, selectedImage);
                 return;
             }
 
@@ -725,15 +1100,37 @@ namespace DrawingClient.Forms
                     if (resultBytes == null || resultBytes.Length == 0)
                         throw new InvalidOperationException("remove.bg không trả về ảnh.");
 
-                    if (pendingImportImage != null)
-                        pendingImportImage.Dispose();
+                    using (Image resultImage = CreateImageFromBytes(resultBytes))
+                    {
+                        Rectangle target = BuildCenteredImageTarget(resultImage.Size);
+                        ImportImageAndBroadcast(resultImage, target, "bg_removed", "");
+                    }
 
-                    pendingImportImage = CreateImageFromBytes(resultBytes);
-                    isStickyNoteMode = false;
-                    isPlacingSticker = false;
-                    ToastForm.ShowToast(this, "Kéo thả trên canvas để đặt ảnh đã xóa nền");
+                    ToastForm.ShowToast(this, "Đã thêm ảnh đã xóa nền vào canvas");
                 });
             }
+        }
+
+        private async Task RemoveBackgroundFromCanvasImageAsync(Button button, ImportImagePayload selectedImage)
+        {
+            if (selectedImage == null || string.IsNullOrWhiteSpace(selectedImage.ImageData))
+                return;
+
+            byte[] inputBytes = Convert.FromBase64String(selectedImage.ImageData);
+            await RunButtonTaskAsync(button, "AI đang xóa nền...", async () =>
+            {
+                byte[] resultBytes = await RemoveBgClient.RemoveBackgroundAsync(inputBytes);
+                if (resultBytes == null || resultBytes.Length == 0)
+                    throw new InvalidOperationException("remove.bg không trả về ảnh.");
+
+                using (Image resultImage = CreateImageFromBytes(resultBytes))
+                {
+                    var target = new Rectangle(selectedImage.X, selectedImage.Y, selectedImage.Width, selectedImage.Height);
+                    ImportImageAndBroadcast(resultImage, target, "bg_removed", "", selectedImage.ActionID);
+                }
+
+                ToastForm.ShowToast(this, "Đã xóa nền ảnh đang chọn");
+            });
         }
 
         private async Task RunButtonTaskAsync(Button button, string busyText, Func<Task> action)
@@ -828,27 +1225,120 @@ namespace DrawingClient.Forms
             return new Rectangle(x, y, width, height);
         }
 
-        private void ImportImageAndBroadcast(Image image, Rectangle target)
+        private void ImportImageAndBroadcast(Image image, Rectangle target, string aiType = null, string prompt = null, string actionIdOverride = null)
         {
-            canvasManager.ImportImage(image, target);
+            string actionId = string.IsNullOrWhiteSpace(actionIdOverride) ? Guid.NewGuid().ToString() : actionIdOverride;
+            long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            canvasManager.ImportImage(image, target, actionId, _network?.CurrentUsername, timestamp);
 
             using (MemoryStream ms = new MemoryStream())
             {
                 image.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-                _network?.Send(CommandType.IMPORT_IMAGE, new ImportImagePayload
+                string imageData = Convert.ToBase64String(ms.ToArray());
+                RecordAction(ToDrawAction(new ImportImagePayload
                 {
-                    ActionID = Guid.NewGuid().ToString(),
+                    ActionID = actionId,
                     Username = _network?.CurrentUsername,
                     X = target.X,
                     Y = target.Y,
                     Width = target.Width,
                     Height = target.Height,
-                    ImageData = Convert.ToBase64String(ms.ToArray()),
-                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                });
+                    ImageData = imageData,
+                    Timestamp = timestamp
+                }), true);
+
+                if (string.Equals(aiType, "text_to_image", StringComparison.OrdinalIgnoreCase))
+                {
+                    _network?.Send(CommandType.AI_TEXT_TO_IMAGE, new AiTextToImageResultPayload
+                    {
+                        ActionID = actionId,
+                        RequesterUsername = _network?.CurrentUsername,
+                        Prompt = prompt ?? "",
+                        X = target.X,
+                        Y = target.Y,
+                        Width = target.Width,
+                        Height = target.Height,
+                        ImageData = imageData,
+                        Timestamp = timestamp
+                    });
+                }
+                else if (string.Equals(aiType, "bg_removed", StringComparison.OrdinalIgnoreCase))
+                {
+                    _network?.Send(CommandType.AI_BG_REMOVED, new AiBgRemovedPayload
+                    {
+                        ActionID = actionId,
+                        RequesterUsername = _network?.CurrentUsername,
+                        X = target.X,
+                        Y = target.Y,
+                        Width = target.Width,
+                        Height = target.Height,
+                        ImageData = imageData,
+                        Timestamp = timestamp
+                    });
+                }
+                else
+                {
+                    _network?.Send(CommandType.IMPORT_IMAGE, new ImportImagePayload
+                    {
+                        ActionID = actionId,
+                        Username = _network?.CurrentUsername,
+                        X = target.X,
+                        Y = target.Y,
+                        Width = target.Width,
+                        Height = target.Height,
+                        ImageData = imageData,
+                        Timestamp = timestamp
+                    });
+                }
             }
 
             canvas.Invalidate();
+        }
+
+        private string EncodeBackgroundImageForNetwork(Image image)
+        {
+            Size canvasSize = canvasManager.CanvasSize;
+            int width = canvasSize.Width > 0 ? canvasSize.Width : 1920;
+            int height = canvasSize.Height > 0 ? canvasSize.Height : 1080;
+
+            using (Bitmap bitmap = new Bitmap(width, height))
+            using (Graphics g = Graphics.FromImage(bitmap))
+            using (MemoryStream ms = new MemoryStream())
+            {
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+                g.Clear(canvasManager.BackgroundColor);
+                g.DrawImage(image, new Rectangle(0, 0, width, height));
+
+                var jpegCodec = GetJpegCodec();
+                if (jpegCodec != null)
+                {
+                    using (var encoderParameters = new System.Drawing.Imaging.EncoderParameters(1))
+                    {
+                        encoderParameters.Param[0] = new System.Drawing.Imaging.EncoderParameter(
+                            System.Drawing.Imaging.Encoder.Quality,
+                            85L);
+                        bitmap.Save(ms, jpegCodec, encoderParameters);
+                    }
+                }
+                else
+                {
+                    bitmap.Save(ms, System.Drawing.Imaging.ImageFormat.Jpeg);
+                }
+
+                return Convert.ToBase64String(ms.ToArray());
+            }
+        }
+
+        private static System.Drawing.Imaging.ImageCodecInfo GetJpegCodec()
+        {
+            foreach (var codec in System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders())
+            {
+                if (string.Equals(codec.MimeType, "image/jpeg", StringComparison.OrdinalIgnoreCase))
+                    return codec;
+            }
+
+            return null;
         }
 
         private void SendChatMessage()
@@ -941,14 +1431,271 @@ namespace DrawingClient.Forms
             lstLogs.TopIndex = lstLogs.Items.Count - 1;
         }
 
+        private void RecordAction(DrawAction action, bool isOwnAction)
+        {
+            if (action == null || string.IsNullOrWhiteSpace(action.ActionID))
+                return;
+
+            actionHistory.Add(action);
+            if (isOwnAction)
+            {
+                undoneActionIds.Remove(action.ActionID);
+                ownRedoActionIds.Clear();
+            }
+        }
+
+        private static DrawAction ToDrawAction(DrawPayload payload)
+        {
+            if (payload == null)
+                return null;
+
+            return new DrawAction
+            {
+                ActionID = payload.ActionID,
+                Username = payload.Username,
+                ToolType = payload.ToolType,
+                X1 = payload.X1,
+                Y1 = payload.Y1,
+                X2 = payload.X2,
+                Y2 = payload.Y2,
+                ColorARGB = payload.ColorARGB,
+                Thickness = payload.Thickness,
+                Text = payload.Text,
+                FontName = payload.FontName,
+                FontSize = payload.FontSize,
+                IsDeleted = payload.IsDeleted,
+                Timestamp = payload.Timestamp
+            };
+        }
+
+        private static DrawAction ToDrawAction(FloodFillPayload payload)
+        {
+            if (payload == null)
+                return null;
+
+            return new DrawAction
+            {
+                ActionID = payload.ActionID,
+                Username = payload.Username,
+                ToolType = "FloodFill",
+                X1 = payload.X,
+                Y1 = payload.Y,
+                ColorARGB = payload.ColorARGB,
+                Timestamp = payload.Timestamp
+            };
+        }
+
+        private static DrawAction ToDrawAction(SetBackgroundPayload payload)
+        {
+            if (payload == null)
+                return null;
+
+            return new DrawAction
+            {
+                ActionID = payload.ActionID,
+                Username = payload.Username,
+                ToolType = "SetBackground",
+                ColorARGB = payload.ColorARGB,
+                ImageData = payload.ImageData,
+                Timestamp = payload.Timestamp
+            };
+        }
+
+        private static DrawAction ToDrawAction(ImportImagePayload payload)
+        {
+            if (payload == null)
+                return null;
+
+            return new DrawAction
+            {
+                ActionID = payload.ActionID,
+                Username = payload.Username,
+                ToolType = "ImportImage",
+                X1 = payload.X,
+                Y1 = payload.Y,
+                ImageWidth = payload.Width,
+                ImageHeight = payload.Height,
+                ImageData = payload.ImageData,
+                IsDeleted = payload.IsDeleted,
+                Timestamp = payload.Timestamp
+            };
+        }
+
+        private static DrawAction ToDrawAction(StickerPayload payload)
+        {
+            if (payload == null)
+                return null;
+
+            return new DrawAction
+            {
+                ActionID = payload.ActionID,
+                Username = payload.Username,
+                ToolType = "Sticker",
+                Text = payload.StickerID,
+                X1 = payload.X,
+                Y1 = payload.Y,
+                ImageWidth = payload.Width,
+                ImageHeight = payload.Height,
+                IsDeleted = payload.IsDeleted,
+                Timestamp = payload.Timestamp
+            };
+        }
+
+        private List<DrawAction> GetVisibleActions()
+        {
+            var visible = new List<DrawAction>();
+            foreach (var action in actionHistory)
+            {
+                if (action == null || string.IsNullOrWhiteSpace(action.ActionID))
+                    continue;
+                if (!undoneActionIds.Contains(action.ActionID))
+                    visible.Add(action);
+            }
+            return visible;
+        }
+
+        private void RenderVisibleHistory()
+        {
+            canvasManager.RenderActionHistory(GetVisibleActions());
+        }
+
+        private string GetLastUndoableOwnActionId()
+        {
+            string currentUsername = _network?.CurrentUsername ?? "";
+            var seenActionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = actionHistory.Count - 1; i >= 0; i--)
+            {
+                var action = actionHistory[i];
+                if (action == null || string.IsNullOrWhiteSpace(action.ActionID))
+                    continue;
+                if (!string.Equals(action.Username ?? "", currentUsername, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (seenActionIds.Contains(action.ActionID))
+                    continue;
+                seenActionIds.Add(action.ActionID);
+                if (!undoneActionIds.Contains(action.ActionID))
+                    return action.ActionID;
+            }
+            return null;
+        }
+
+        private void UndoOwnLastAction()
+        {
+            string actionId = GetLastUndoableOwnActionId();
+            if (string.IsNullOrWhiteSpace(actionId))
+                return;
+
+            undoneActionIds.Add(actionId);
+            ownRedoActionIds.Add(actionId);
+            RenderVisibleHistory();
+            _network?.SendUndo(actionId);
+        }
+
+        private void RedoOwnLastAction()
+        {
+            while (ownRedoActionIds.Count > 0)
+            {
+                int index = ownRedoActionIds.Count - 1;
+                string actionId = ownRedoActionIds[index];
+                ownRedoActionIds.RemoveAt(index);
+                if (string.IsNullOrWhiteSpace(actionId) || !undoneActionIds.Contains(actionId))
+                    continue;
+
+                undoneActionIds.Remove(actionId);
+                RenderVisibleHistory();
+                _network?.SendRedo(actionId);
+                return;
+            }
+        }
+
+        private void ApplyUndoFromNetwork(UndoPayload payload)
+        {
+            if (payload == null || string.IsNullOrWhiteSpace(payload.ActionID))
+                return;
+            if (!ActionBelongsToUser(payload.ActionID, payload.Username))
+                return;
+
+            bool changed = undoneActionIds.Add(payload.ActionID);
+            if (changed && string.Equals(payload.Username ?? "", _network?.CurrentUsername ?? "", StringComparison.OrdinalIgnoreCase))
+                ownRedoActionIds.Add(payload.ActionID);
+
+            if (changed)
+                RenderVisibleHistory();
+        }
+
+        private void ApplyRedoFromNetwork(RedoPayload payload)
+        {
+            if (payload == null || string.IsNullOrWhiteSpace(payload.ActionID))
+                return;
+            if (!ActionBelongsToUser(payload.ActionID, payload.Username))
+                return;
+
+            if (undoneActionIds.Remove(payload.ActionID))
+                RenderVisibleHistory();
+        }
+
+        private bool ActionBelongsToUser(string actionId, string username)
+        {
+            if (string.IsNullOrWhiteSpace(actionId) || string.IsNullOrWhiteSpace(username))
+                return false;
+
+            foreach (var action in actionHistory)
+            {
+                if (action == null)
+                    continue;
+                if (string.Equals(action.ActionID, actionId, StringComparison.OrdinalIgnoreCase))
+                    return string.Equals(action.Username ?? "", username, StringComparison.OrdinalIgnoreCase);
+            }
+
+            return false;
+        }
+
+        private bool IsCurrentUser(string username)
+        {
+            return !string.IsNullOrWhiteSpace(username) &&
+                string.Equals(username, _network?.CurrentUsername ?? "", StringComparison.OrdinalIgnoreCase);
+        }
+
         private void NetworkEvents_OnCursorReceived(CursorPayload payload)
         {
             if (payload == null)
+                return;
+            if (IsCurrentUser(payload.Username))
                 return;
             UIInvoke(() =>
             {
                 canvasManager.UpdateRemoteCursor(payload.Username, new Point(payload.X, payload.Y));
                 cursorLayer?.UpdateCursor(payload);
+            });
+        }
+
+        private void NetworkEvents_OnRoomMembersReceived(RoomMembersPayload payload)
+        {
+            if (payload?.Members == null)
+                return;
+
+            UIInvoke(() =>
+            {
+                if (lstMembers == null)
+                    return;
+
+                lstMembers.BeginUpdate();
+                try
+                {
+                    lstMembers.Items.Clear();
+                    foreach (var member in payload.Members)
+                    {
+                        string name = string.IsNullOrWhiteSpace(member.Username) ? "unknown" : member.Username;
+                        string role = member.IsSpectator ? "observer" : "editor";
+                        string state = member.IsOnline ? "online" : "offline";
+                        string color = member.ColorARGB == 0 ? "n/a" : $"#{member.ColorARGB & 0x00FFFFFF:X6}";
+                        lstMembers.Items.Add($"{name} | {role} | {state} | {color}");
+                    }
+                }
+                finally
+                {
+                    lstMembers.EndUpdate();
+                }
             });
         }
 
@@ -976,11 +1723,28 @@ namespace DrawingClient.Forms
             });
         }
 
-        private void NetworkEvents_OnDrawReceived(DrawPayload payload) => UIInvoke(() => canvasManager.ApplyRemoteDraw(payload));
+        private void NetworkEvents_OnDrawReceived(DrawPayload payload) => UIInvoke(() =>
+        {
+            RecordAction(ToDrawAction(payload), false);
+            canvasManager.ApplyRemoteDraw(payload);
+        });
         private void NetworkEvents_OnSyncBoardReceived(SyncBoardPayload payload)
         {
             if (payload?.Actions == null)
                 return;
+            if (payload.Actions.Count >= 0)
+            {
+                actionHistory.Clear();
+                actionHistory.AddRange(payload.Actions);
+                undoneActionIds.Clear();
+                ownRedoActionIds.Clear();
+                UIInvoke(() =>
+                {
+                    RenderVisibleHistory();
+                    AppendLog($"Dong bo {payload.Actions.Count} hanh dong tu phong");
+                });
+                return;
+            }
             UIInvoke(() =>
             {
                 // ✅ FIX: Clear canvas trước khi replay để tránh bị chồng nét khi reconnect
@@ -1004,7 +1768,8 @@ namespace DrawingClient.Forms
                         // ✅ FIX: Replay màu nền khi reconnect
                         canvasManager.ApplyRemoteSetBackground(new SharedLib.Payloads.SetBackgroundPayload
                         {
-                            ColorARGB = action.ColorARGB
+                            ColorARGB = action.ColorARGB,
+                            ImageData = action.ImageData
                         });
                     }
                     else if (tool.Equals("Sticker", StringComparison.OrdinalIgnoreCase))
@@ -1012,22 +1777,30 @@ namespace DrawingClient.Forms
                         // ✅ FIX: Replay sticker khi reconnect
                         canvasManager.AddSticker(new SharedLib.Payloads.StickerPayload
                         {
+                            ActionID = action.ActionID,
+                            Username  = action.Username,
                             StickerID = action.Text,   // StickerID được map vào field Text khi lưu
                             X         = action.X1,
                             Y         = action.Y1,
                             Width     = action.ImageWidth  > 0 ? action.ImageWidth  : 64,
                             Height    = action.ImageHeight > 0 ? action.ImageHeight : 64,
+                            IsDeleted = action.IsDeleted,
+                            Timestamp = action.Timestamp,
                         });
                     }
                     else if (tool.Equals("ImportImage", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(action.ImageData))
                     {
                         canvasManager.ApplyRemoteImportImage(new SharedLib.Payloads.ImportImagePayload
                         {
+                            ActionID = action.ActionID,
+                            Username = action.Username,
                             X = action.X1,
                             Y = action.Y1,
                             Width = action.ImageWidth > 0 ? action.ImageWidth : 400,
                             Height = action.ImageHeight > 0 ? action.ImageHeight : 300,
-                            ImageData = action.ImageData
+                            ImageData = action.ImageData,
+                            IsDeleted = action.IsDeleted,
+                            Timestamp = action.Timestamp
                         });
                     }
                     else
@@ -1038,26 +1811,92 @@ namespace DrawingClient.Forms
                 AppendLog($"Đồng bộ {payload.Actions.Count} hành động từ phòng");
             });
         }
-        private void NetworkEvents_OnFloodFillReceived(FloodFillPayload payload) => UIInvoke(() => canvasManager.ApplyRemoteFloodFill(payload));
-        private void NetworkEvents_OnImportImageReceived(ImportImagePayload payload) => UIInvoke(() => canvasManager.ApplyRemoteImportImage(payload));
-        private void NetworkEvents_OnSetBackgroundReceived(SetBackgroundPayload payload) => UIInvoke(() => canvasManager.ApplyRemoteSetBackground(payload));
-        private void NetworkEvents_OnClearAllReceived() => UIInvoke(() => canvasManager.ApplyRemoteClearAll());
-        private void NetworkEvents_OnUndoReceived(UndoPayload payload) => UIInvoke(() => canvasManager.Undo());
-        private void NetworkEvents_OnRedoReceived(RedoPayload payload) => UIInvoke(() => canvasManager.Redo());
+        private void NetworkEvents_OnFloodFillReceived(FloodFillPayload payload) => UIInvoke(() =>
+        {
+            RecordAction(ToDrawAction(payload), false);
+            canvasManager.ApplyRemoteFloodFill(payload);
+        });
+        private void NetworkEvents_OnImportImageReceived(ImportImagePayload payload) => UIInvoke(() =>
+        {
+            RecordAction(ToDrawAction(payload), false);
+            canvasManager.ApplyRemoteImportImage(payload);
+        });
+        private void NetworkEvents_OnAiTextToImageResult(AiTextToImageResultPayload payload)
+        {
+            if (payload == null)
+                return;
+
+            UIInvoke(() =>
+            {
+                var importPayload = new ImportImagePayload
+                {
+                    ActionID = payload.ActionID,
+                    Username = payload.RequesterUsername,
+                    X = payload.X,
+                    Y = payload.Y,
+                    Width = payload.Width,
+                    Height = payload.Height,
+                    ImageData = payload.ImageData,
+                    Timestamp = payload.Timestamp
+                };
+                RecordAction(ToDrawAction(importPayload), false);
+                canvasManager.ApplyRemoteImportImage(importPayload);
+                AppendLog($"AI text-to-image: {payload.RequesterUsername}");
+            });
+        }
+
+        private void NetworkEvents_OnAiBgRemovedResult(AiBgRemovedPayload payload)
+        {
+            if (payload == null)
+                return;
+
+            UIInvoke(() =>
+            {
+                var importPayload = new ImportImagePayload
+                {
+                    ActionID = payload.ActionID,
+                    Username = payload.RequesterUsername,
+                    X = payload.X,
+                    Y = payload.Y,
+                    Width = payload.Width,
+                    Height = payload.Height,
+                    ImageData = payload.ImageData,
+                    Timestamp = payload.Timestamp
+                };
+                RecordAction(ToDrawAction(importPayload), false);
+                canvasManager.ApplyRemoteImportImage(importPayload);
+                AppendLog($"AI remove.bg: {payload.RequesterUsername}");
+            });
+        }
+
+        private void NetworkEvents_OnSetBackgroundReceived(SetBackgroundPayload payload) => UIInvoke(() =>
+        {
+            RecordAction(ToDrawAction(payload), false);
+            canvasManager.ApplyRemoteSetBackground(payload);
+        });
+        private void NetworkEvents_OnClearAllReceived() => UIInvoke(() =>
+        {
+            actionHistory.Clear();
+            undoneActionIds.Clear();
+            ownRedoActionIds.Clear();
+            canvasManager.ApplyRemoteClearAll();
+        });
+        private void NetworkEvents_OnUndoReceived(UndoPayload payload) => UIInvoke(() => ApplyUndoFromNetwork(payload));
+        private void NetworkEvents_OnRedoReceived(RedoPayload payload) => UIInvoke(() => ApplyRedoFromNetwork(payload));
 
         private void NetworkEvents_OnLaserReceived(LaserPayload payload)
         {
             if (payload == null || string.IsNullOrWhiteSpace(payload.Username))
                 return;
+            if (IsCurrentUser(payload.Username))
+                return;
 
             UIInvoke(() =>
             {
                 if (payload.IsActive)
-                    cursorLayer.OtherLasers[payload.Username] = new Point(payload.X, payload.Y);
-                else if (cursorLayer.OtherLasers.ContainsKey(payload.Username))
-                    cursorLayer.OtherLasers.Remove(payload.Username);
-
-                canvas.Invalidate();
+                    canvasManager.UpdateRemoteLaser(payload.Username, new Point(payload.X, payload.Y));
+                else
+                    canvasManager.RemoveRemoteLaser(payload.Username);
             });
         }
 
@@ -1106,7 +1945,11 @@ namespace DrawingClient.Forms
         {
             if (payload == null)
                 return;
-            UIInvoke(() => canvasManager.AddSticker(payload));
+            UIInvoke(() =>
+            {
+                RecordAction(ToDrawAction(payload), false);
+                canvasManager.AddSticker(payload);
+            });
         }
 
         private void NetworkEvents_OnStickyNoteReceived(StickyNotePayload payload)
@@ -1116,15 +1959,33 @@ namespace DrawingClient.Forms
 
             UIInvoke(() =>
             {
+                if (!payload.IsOpen)
+                {
+                    if (noteControls.TryGetValue(payload.NoteID, out var deletedNote))
+                    {
+                        noteControls.Remove(payload.NoteID);
+                        if (selectedStickyNoteId == payload.NoteID)
+                            selectedStickyNoteId = null;
+
+                        canvas.Controls.Remove(deletedNote);
+                        deletedNote.Dispose();
+                    }
+
+                    return;
+                }
+
                 if (!noteControls.TryGetValue(payload.NoteID, out var note))
                 {
                     note = new StickyNoteControl { NoteId = payload.NoteID, Author = payload.AuthorUsername };
                     note.NoteChanged += StickyNoteChanged;
+                    note.NoteSelected += StickyNoteSelected;
                     canvas.Controls.Add(note);
                     noteControls[payload.NoteID] = note;
                 }
 
                 note.Location = new Point(payload.X, payload.Y);
+                if (payload.Width > 0 && payload.Height > 0)
+                    note.Size = new Size(payload.Width, payload.Height);
                 note.NoteText = payload.Text ?? string.Empty;
                 note.BringToFront();
             });
@@ -1159,13 +2020,39 @@ namespace DrawingClient.Forms
                 string.Equals(payload.ActiveUser, _network.CurrentUsername, StringComparison.OrdinalIgnoreCase);
 
             canvasManager.IsDrawingEnabled = isMyTurn;
-            turnPanel.SetState(payload.IsEnabled, payload.ActiveUser);
+            turnPanel.SetState(payload.IsEnabled, payload.ActiveUser, _isRoomOwner);
             AppendLog(payload.IsEnabled
                 ? $"Vẽ theo lượt: bật, lượt của {payload.ActiveUser}"
                 : "Vẽ theo lượt: tắt");
             ToastForm.ShowToast(this, payload.IsEnabled
                 ? (isMyTurn ? "Bạn đang có quyền vẽ" : $"Đang chờ lượt của {payload.ActiveUser}")
                 : "Đã tắt vẽ theo lượt");
+        }
+
+        private void HandleNextTurnRequested()
+        {
+            if (!_isRoomOwner)
+            {
+                ToastForm.ShowToast(this, "Chỉ chủ phòng mới được chuyển lượt");
+                return;
+            }
+
+            if (!turnPanel.IsEnabled)
+            {
+                ToastForm.ShowToast(this, "Hãy bật vẽ theo lượt trước");
+                return;
+            }
+
+            var payload = new TurnBasedPayload
+            {
+                RoomCode = _roomCode,
+                Username = _network.CurrentUsername,
+                IsEnabled = true,
+                ActiveUser = turnPanel.ActiveUser
+            };
+
+            _network?.Send(CommandType.TURN_CHANGE, payload);
+            _udpManager?.SendTurnChange(payload);
         }
 
         private void NetworkEvents_OnSaveGalleryResponse(SaveGalleryResponse payload)
@@ -1175,34 +2062,25 @@ namespace DrawingClient.Forms
             UIInvoke(() => ToastForm.ShowToast(this, payload.Message ?? (payload.IsSuccess ? "Đã lưu Gallery" : "Lỗi lưu Gallery")));
         }
 
-        private void NetworkEvents_OnGifExportProgress(GifExportProgressPayload payload)
-        {
-            if (payload == null)
-                return;
-            UIInvoke(() =>
-            {
-                gifProgress.Value = Math.Max(0, Math.Min(100, payload.ProgressPercent));
-                lblGifStatus.Text = $"GIF: {payload.Status} ({payload.ProgressPercent}%)";
-
-                if (payload.Status == "completed" && !string.IsNullOrWhiteSpace(payload.GifData))
-                {
-                    using (SaveFileDialog saveFileDialog = new SaveFileDialog())
-                    {
-                        saveFileDialog.Filter = "GIF Image|*.gif";
-                        saveFileDialog.FileName = $"drawing_{DateTime.Now:yyyyMMdd_HHmmss}.gif";
-                        if (saveFileDialog.ShowDialog() == DialogResult.OK)
-                        {
-                            File.WriteAllBytes(saveFileDialog.FileName, Convert.FromBase64String(payload.GifData));
-                            ToastForm.ShowToast(this, "Đã lưu GIF");
-                        }
-                    }
-                }
-            });
-        }
-
         private void MainForm_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.Shift) canvas.Cursor = Cursors.Cross;
+
+            if (e.Control && (e.KeyCode == Keys.Oemplus || e.KeyCode == Keys.Add))
+            {
+                AdjustCanvasZoom(ZoomStep);
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return;
+            }
+
+            if (e.Control && (e.KeyCode == Keys.OemMinus || e.KeyCode == Keys.Subtract))
+            {
+                AdjustCanvasZoom(-ZoomStep);
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return;
+            }
 
             if (e.KeyCode == Keys.D1)
             {
@@ -1231,19 +2109,45 @@ namespace DrawingClient.Forms
 
             if (e.KeyCode == Keys.Menu)
             {
-                var pos = canvas.PointToClient(Cursor.Position);
-                _udpManager?.SendLaser(new LaserPayload { Username = _network.CurrentUsername, X = pos.X, Y = pos.Y, IsActive = false });
+                var pos = canvasManager?.ScreenToCanvas(canvas.PointToClient(Cursor.Position)) ?? canvas.PointToClient(Cursor.Position);
+                SendLaserRealtime(new LaserPayload { Username = _network?.CurrentUsername, X = pos.X, Y = pos.Y, IsActive = false });
             }
+        }
+
+        private void Canvas_MouseWheel(object sender, MouseEventArgs e)
+        {
+            if ((ModifierKeys & Keys.Control) != Keys.Control)
+                return;
+
+            AdjustCanvasZoom(e.Delta > 0 ? ZoomStep : -ZoomStep, e.Location);
         }
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            if (keyData == Keys.Delete)
+            {
+                bool isTextInputFocused = ActiveControl is TextBoxBase || (ActiveControl != null && ActiveControl.GetType().Name.IndexOf("TextBox", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (!isTextInputFocused && EnsureCanDraw())
+                {
+                    if (DeleteSelectedStickyNote())
+                    {
+                        ToastForm.ShowToast(this, "Da xoa sticky note duoc chon");
+                        return true;
+                    }
+
+                    if (canvas != null && canvas.Focused && canvasManager != null && canvasManager.DeleteSelectedObject())
+                    {
+                        ToastForm.ShowToast(this, "Da xoa doi tuong duoc chon");
+                        return true;
+                    }
+                }
+            }
+
             if (keyData == (Keys.Control | Keys.Z))
             {
                 if (EnsureCanDraw())
                 {
-                    canvasManager.Undo();
-                    _network?.SendUndo(Guid.NewGuid().ToString());
+                    UndoOwnLastAction();
                 }
                 return true;
             }
@@ -1251,8 +2155,7 @@ namespace DrawingClient.Forms
             {
                 if (EnsureCanDraw())
                 {
-                    canvasManager.Redo();
-                    _network?.SendRedo(Guid.NewGuid().ToString());
+                    RedoOwnLastAction();
                 }
                 return true;
             }
@@ -1305,12 +2208,18 @@ namespace DrawingClient.Forms
         private class StickyNoteControl : Panel
         {
             private bool dragging;
+            private bool resizing;
             private Point dragOffset;
+            private Point resizeStartPoint;
+            private Size resizeStartSize;
+            private readonly Label header;
             private readonly TextBox txt;
+            private readonly Panel resizeGrip;
             public string NoteId { get; set; }
             public string Author { get; set; }
             public string NoteText { get => txt.Text; set => txt.Text = value; }
             public event Action<StickyNoteControl> NoteChanged;
+            public event Action<StickyNoteControl> NoteSelected;
 
             public StickyNoteControl()
             {
@@ -1318,8 +2227,15 @@ namespace DrawingClient.Forms
                 BackColor = Color.FromArgb(255, 255, 220);
                 BorderStyle = BorderStyle.FixedSingle;
 
-                var header = new Label { Dock = DockStyle.Top, Height = 20, Text = "Ghi chú", BackColor = Color.Khaki, Padding = new Padding(4, 0, 0, 0) };
+                header = new Label { Dock = DockStyle.Top, Height = 20, Text = "Ghi chú", BackColor = Color.Khaki, Padding = new Padding(4, 0, 0, 0) };
                 txt = new TextBox { Dock = DockStyle.Fill, Multiline = true, BorderStyle = BorderStyle.None, BackColor = BackColor };
+                resizeGrip = new Panel
+                {
+                    Size = new Size(12, 12),
+                    BackColor = Color.Goldenrod,
+                    Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                    Cursor = Cursors.SizeNWSE
+                };
 
                 header.MouseDown += DragStart;
                 header.MouseMove += DragMove;
@@ -1328,14 +2244,33 @@ namespace DrawingClient.Forms
                 MouseMove += DragMove;
                 MouseUp += DragEnd;
                 txt.Leave += (s, e) => NoteChanged?.Invoke(this);
+                txt.Enter += (s, e) => NoteSelected?.Invoke(this);
+                txt.MouseDown += (s, e) => NoteSelected?.Invoke(this);
+                resizeGrip.MouseDown += ResizeStart;
+                resizeGrip.MouseMove += ResizeMove;
+                resizeGrip.MouseUp += ResizeEnd;
+
+                Resize += (s, e) => PositionResizeGrip();
 
                 Controls.Add(txt);
                 Controls.Add(header);
+                Controls.Add(resizeGrip);
+                PositionResizeGrip();
+            }
+
+            private void PositionResizeGrip()
+            {
+                resizeGrip.Location = new Point(Math.Max(0, Width - resizeGrip.Width - 1), Math.Max(0, Height - resizeGrip.Height - 1));
+                resizeGrip.BringToFront();
             }
 
             private void DragStart(object sender, MouseEventArgs e)
             {
+                if (resizing)
+                    return;
+
                 if (e.Button != MouseButtons.Left) return;
+                NoteSelected?.Invoke(this);
                 dragging = true;
                 dragOffset = e.Location;
                 BringToFront();
@@ -1355,26 +2290,75 @@ namespace DrawingClient.Forms
                 dragging = false;
                 NoteChanged?.Invoke(this);
             }
+
+            private void ResizeStart(object sender, MouseEventArgs e)
+            {
+                if (e.Button != MouseButtons.Left)
+                    return;
+
+                NoteSelected?.Invoke(this);
+                resizing = true;
+                dragging = false;
+                resizeStartPoint = PointToScreen(e.Location);
+                resizeStartSize = Size;
+                BringToFront();
+            }
+
+            private void ResizeMove(object sender, MouseEventArgs e)
+            {
+                if (!resizing)
+                    return;
+
+                Point current = PointToScreen(e.Location);
+                int width = Math.Max(120, resizeStartSize.Width + (current.X - resizeStartPoint.X));
+                int height = Math.Max(80, resizeStartSize.Height + (current.Y - resizeStartPoint.Y));
+                Size = new Size(width, height);
+                PositionResizeGrip();
+            }
+
+            private void ResizeEnd(object sender, MouseEventArgs e)
+            {
+                if (!resizing)
+                    return;
+
+                resizing = false;
+                NoteChanged?.Invoke(this);
+            }
+
+            public void SetSelected(bool selected)
+            {
+                BorderStyle = selected ? BorderStyle.Fixed3D : BorderStyle.FixedSingle;
+                header.BackColor = selected ? Color.Gold : Color.Khaki;
+            }
         }
 
         private class TurnPanelControl : Panel
         {
             private readonly Label lbl;
+            private readonly Button btnNextTurn;
             public bool IsEnabled { get; private set; }
+            public string ActiveUser { get; private set; } = string.Empty;
+            public event Action NextTurnRequested;
 
             public TurnPanelControl()
             {
-                Height = 44;
+                Height = 76;
                 BackColor = Color.AliceBlue;
                 BorderStyle = BorderStyle.FixedSingle;
-                lbl = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(8, 0, 0, 0), Text = "Turn-based: OFF" };
+                lbl = new Label { Dock = DockStyle.Top, Height = 28, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(8, 0, 0, 0), Text = "Turn-based: OFF" };
+                btnNextTurn = new Button { Dock = DockStyle.Bottom, Height = 30, Text = "Lượt kế tiếp" };
+                btnNextTurn.Click += (s, e) => NextTurnRequested?.Invoke();
+                Controls.Add(btnNextTurn);
                 Controls.Add(lbl);
             }
 
-            public void SetState(bool enabled, string activeUser)
+            public void SetState(bool enabled, string activeUser, bool canAdvanceTurn)
             {
                 IsEnabled = enabled;
-                lbl.Text = enabled ? $"Turn-based: ON | Lượt: {activeUser}" : "Turn-based: OFF";
+                ActiveUser = activeUser ?? string.Empty;
+                lbl.Text = enabled ? $"Turn-based: ON | Lượt: {ActiveUser}" : "Turn-based: OFF";
+                btnNextTurn.Visible = enabled && canAdvanceTurn;
+                btnNextTurn.Enabled = enabled && canAdvanceTurn;
             }
         }
 

@@ -17,6 +17,7 @@ namespace SharedLib.Payloads
         public string Text { get; set; }          // Dùng khi ToolType = "Text"
         public string FontName { get; set; }
         public int FontSize { get; set; }
+        public bool IsDeleted { get; set; }
         public long Timestamp { get; set; }       // Unix ms
     }
 
@@ -39,6 +40,7 @@ namespace SharedLib.Payloads
         public int Width { get; set; }
         public int Height { get; set; }
         public string ImageData { get; set; }    // base64 JPEG 70%
+        public bool IsDeleted { get; set; }
         public long Timestamp { get; set; }
     }
 
@@ -48,6 +50,7 @@ namespace SharedLib.Payloads
         public string RoomCode { get; set; }
         public string Username { get; set; }
         public int ColorARGB { get; set; }
+        public string ImageData { get; set; }     // base64 image; empty means solid color background
         public long Timestamp { get; set; }
     }
 }

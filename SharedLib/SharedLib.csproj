@@ -56,9 +56,7 @@
     <Compile Include="Payloads\ClaimPayload.cs" />
     <Compile Include="Payloads\DrawPayload.cs" />
     <Compile Include="Payloads\GalleryPayload.cs" />
-    <Compile Include="Payloads\GamificationPayload.cs" />
     <Compile Include="Payloads\PixelArtPayload.cs" />
-    <Compile Include="Payloads\GifExportPayload.cs" />
     <Compile Include="Payloads\InteractionPayload.cs" />
     <Compile Include="Payloads\RoomPayload.cs" />
     <Compile Include="Payloads\SyncPayload.cs" />

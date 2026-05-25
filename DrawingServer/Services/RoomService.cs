@@ -20,8 +20,8 @@ namespace DrawingServer.Services
             public string RoomCode { get; set; } = "";
             public string OwnerId { get; set; } = "";
             public List<DrawingServer.Network.ClientSession> Members { get; set; } = new List<DrawingServer.Network.ClientSession>();
-            public int CanvasWidth { get; set; } = 1280;
-            public int CanvasHeight { get; set; } = 720;
+            public int CanvasWidth { get; set; } = 1920;
+            public int CanvasHeight { get; set; } = 1080;
             public DateTime CreatedTime { get; set; } = DateTime.UtcNow;
             public bool IsActive { get; set; } = true;
             public bool IsTurnBasedEnabled { get; set; }
@@ -34,7 +34,7 @@ namespace DrawingServer.Services
             return Math.Max(1, EnvLoader.GetInt("MAX_ROOM_MEMBERS", 5));
         }
 
-        public static async Task<(bool Success, string RoomCode, string Message)> CreateRoomAsync(string ownerUsername, int canvasWidth = 1280, int canvasHeight = 720)
+        public static async Task<(bool Success, string RoomCode, string Message)> CreateRoomAsync(string ownerUsername, int canvasWidth = 1920, int canvasHeight = 1080)
         {
             try
             {
@@ -83,6 +83,18 @@ namespace DrawingServer.Services
                 if (!roomExists)
                     return (false, "Room does not exist");
 
+                string ownerUsername = string.Empty;
+                bool createNewRoomState = false;
+
+                lock (SyncRoot)
+                {
+                    if (!ActiveRooms.ContainsKey(roomCode))
+                        createNewRoomState = true;
+                }
+
+                if (createNewRoomState)
+                    ownerUsername = await DbManager.GetRoomOwnerUsernameAsync(roomCode);
+
                 lock (SyncRoot)
                 {
                     if (!ActiveRooms.ContainsKey(roomCode))
@@ -90,6 +102,7 @@ namespace DrawingServer.Services
                         ActiveRooms[roomCode] = new RoomState
                         {
                             RoomCode = roomCode,
+                            OwnerId = ownerUsername,
                             IsActive = true,
                             MaxMembers = GetDefaultMaxMembers()
                         };
@@ -149,7 +162,100 @@ namespace DrawingServer.Services
             }
         }
 
-        public static RoomState GetRoomState(string roomCode)
+        public static bool TryAdvanceTurn(string roomCode, string requestedBy, out string activeUser, out string message)
+        {
+            activeUser = string.Empty;
+            message = string.Empty;
+
+            lock (SyncRoot)
+            {
+                if (!ActiveRooms.TryGetValue(roomCode, out RoomState room))
+                {
+                    message = "Room not found";
+                    return false;
+                }
+
+                if (!room.IsTurnBasedEnabled)
+                {
+                    message = "Turn-based is disabled";
+                    return false;
+                }
+
+                if (!string.Equals(room.OwnerId, requestedBy, StringComparison.OrdinalIgnoreCase))
+                {
+                    message = "Only the room owner can change turns";
+                    return false;
+                }
+
+                activeUser = SelectNextTurnUser(room, room.ActiveDrawingUser);
+                if (string.IsNullOrWhiteSpace(activeUser))
+                {
+                    message = "No eligible member found";
+                    return false;
+                }
+
+                room.ActiveDrawingUser = activeUser;
+                return true;
+            }
+        }
+
+        public static bool TryAdvanceTurnAfterMemberRemoval(string roomCode, string removedUsername, out string activeUser, out bool turnChanged, out string message)
+        {
+            activeUser = string.Empty;
+            turnChanged = false;
+            message = string.Empty;
+
+            lock (SyncRoot)
+            {
+                if (!ActiveRooms.TryGetValue(roomCode, out RoomState room))
+                {
+                    message = "Room not found";
+                    return false;
+                }
+
+                if (!room.IsTurnBasedEnabled)
+                    return true;
+
+                if (!string.Equals(room.ActiveDrawingUser, removedUsername, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                activeUser = SelectNextTurnUser(room, removedUsername);
+                if (string.IsNullOrWhiteSpace(activeUser))
+                {
+                    room.ActiveDrawingUser = string.Empty;
+                    return true;
+                }
+
+                room.ActiveDrawingUser = activeUser;
+                turnChanged = true;
+                return true;
+            }
+        }
+
+        private static string SelectNextTurnUser(RoomState room, string currentActiveUser)
+        {
+            if (room == null || room.Members.Count == 0)
+                return string.Empty;
+
+            var members = room.Members
+                .Where(member => member != null && !string.IsNullOrWhiteSpace(member.Username))
+                .ToList();
+
+            if (members.Count == 0)
+                return string.Empty;
+
+            int currentIndex = members.FindIndex(member => string.Equals(member.Username, currentActiveUser, StringComparison.OrdinalIgnoreCase));
+            for (int offset = 1; offset <= members.Count; offset++)
+            {
+                string candidate = members[(currentIndex + offset) % members.Count]?.Username ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(candidate))
+                    return candidate;
+            }
+
+            return members[0]?.Username ?? string.Empty;
+        }
+
+        public static RoomState? GetRoomState(string roomCode)
         {
             lock (SyncRoot)
             {
@@ -194,11 +300,12 @@ namespace DrawingServer.Services
 
                 foreach (DrawingServer.Network.ClientSession clientSession in room.Members)
                 {
-                    var userSession = AuthService.GetUserSession(clientSession.Username);
+                    string username = clientSession.Username ?? "";
+                    var userSession = AuthService.GetUserSession(username);
                     if (userSession != null)
-                        members.Add((clientSession.Username, userSession.AssignedColor, true));
+                        members.Add((username, userSession.AssignedColor, true));
                     else
-                        members.Add((clientSession.Username, clientSession.AssignedColor, true));
+                        members.Add((username, clientSession.AssignedColor, true));
                 }
             }
             return members;
@@ -214,7 +321,7 @@ namespace DrawingServer.Services
 
                 foreach (DrawingServer.Network.ClientSession client in room.Members)
                 {
-                    var authSession = AuthService.GetUserSession(client.Username);
+                    var authSession = AuthService.GetUserSession(client.Username ?? "");
                     int colorArgb = 0;
                     if (authSession != null && !string.IsNullOrWhiteSpace(authSession.AssignedColor))
                     {

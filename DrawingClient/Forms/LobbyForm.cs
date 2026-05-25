@@ -26,23 +26,35 @@ namespace DrawingClient.Forms
             BuildUi();
             SubscribeEvents();
             this.FormClosed += LobbyForm_FormClosed;
+            this.Resize += (s, e) => CenterContent();
         }
 
         private void BuildUi()
         {
+            // Central flow panel to keep important bits centered
+            var flp = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowOnly,
+                Width = 380,
+                Anchor = AnchorStyles.None
+            };
+
             Label lblWelcome = new Label
             {
                 Text = $"Xin chào, {_username}",
                 AutoSize = true,
-                Location = new Point(20, 20),
-                Font = new Font("Segoe UI", 11, FontStyle.Bold)
+                Font = new Font("Segoe UI", 12, FontStyle.Bold),
+                Margin = new Padding(3, 6, 3, 12)
             };
 
             Button btnCreateRoom = new Button
             {
                 Text = "Tạo phòng mới",
-                Size = new Size(190, 36),
-                Location = new Point(20, 65)
+                Size = new Size(280, 36),
+                Margin = new Padding(3, 3, 3, 6)
             };
             btnCreateRoom.Click += (s, e) =>
             {
@@ -54,22 +66,22 @@ namespace DrawingClient.Forms
             {
                 Text = "Mã phòng:",
                 AutoSize = true,
-                Location = new Point(20, 130)
+                Margin = new Padding(3, 6, 3, 0)
             };
 
             txtRoomCode = new TextBox
             {
-                Location = new Point(20, 153),
-                Width = 190
+                Width = 280,
+                Margin = new Padding(3, 3, 3, 6)
             };
 
             Button btnJoinRoom = new Button
             {
                 Text = "Tham gia phòng",
-                Size = new Size(190, 36),
-                Location = new Point(20, 186)
+                Size = new Size(280, 36),
+                Margin = new Padding(3, 3, 3, 6)
             };
-            btnJoinRoom.Click += (s, e) =>
+            btnJoinRoom.Click += async (s, e) =>
             {
                 string roomCode = txtRoomCode.Text?.Trim();
                 if (string.IsNullOrWhiteSpace(roomCode))
@@ -80,9 +92,16 @@ namespace DrawingClient.Forms
 
                 lblStatus.Text = "Đang gửi yêu cầu tham gia...";
 
+                bool routed = await _network.ReconnectToRoomOwnerViaLoadBalancerAsync(roomCode);
+                if (!routed)
+                {
+                    lblStatus.Text = "Không thể chuyển tới server của phòng.";
+                    return;
+                }
+
                 // ✅ FIX RACE CONDITION: Tạo MainForm và subscribe events TRƯỚC khi gửi JOIN_ROOM
                 // Đảm bảo SYNC_BOARD đến sau khi events đã được đăng ký
-                var pendingMainForm = new MainForm(_network, roomCode);
+                var pendingMainForm = new MainForm(_network, roomCode, false);
 
                 // Override OnJoinRoomResponse một lần để show form nếu thành công
                 Action<JoinRoomResponse> onceHandler = null;
@@ -91,6 +110,8 @@ namespace DrawingClient.Forms
                     NetworkEvents.OnJoinRoomResponse -= onceHandler;
                     if (resp != null && resp.IsSuccess)
                     {
+                        pendingMainForm.SetRoomOwner(resp.IsRoomOwner);
+                        pendingMainForm.RegisterUdpEndpoint();
                         this.BeginInvoke(new Action(() =>
                         {
                             this.Hide();
@@ -115,20 +136,123 @@ namespace DrawingClient.Forms
             lblStatus = new Label
             {
                 AutoSize = false,
-                Width = 390,
-                Height = 32,
+                Width = flp.Width,
+                Height = 36,
                 TextAlign = ContentAlignment.MiddleLeft,
-                Location = new Point(20, 230),
                 ForeColor = Color.DimGray,
-                Text = "Sẵn sàng"
+                Text = "Sẵn sàng",
+                Margin = new Padding(3, 6, 3, 3)
             };
 
-            this.Controls.Add(lblWelcome);
-            this.Controls.Add(btnCreateRoom);
-            this.Controls.Add(lblJoin);
-            this.Controls.Add(txtRoomCode);
-            this.Controls.Add(btnJoinRoom);
-            this.Controls.Add(lblStatus);
+            // Logout button (will be placed on the right of the status)
+            Button btnLogout = new Button
+            {
+                Text = "Đăng xuất",
+                Size = new Size(100, 36),
+                BackColor = Color.Tomato,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Margin = new Padding(6, 3, 3, 3)
+            };
+            btnLogout.FlatAppearance.BorderSize = 0;
+            btnLogout.Click += (s, e) =>
+            {
+                try { _network.Disconnect(); } catch { }
+                var login = new LoginForm();
+                this.Hide();
+                login.FormClosed += (fs, fe) => this.Close();
+                login.Show();
+            };
+
+            // Bottom row: status + logout button side-by-side
+            var bottomRow = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                AutoSize = false,
+                Height = Math.Max(lblStatus.Height, btnLogout.Height) + 6,
+                Width = flp.Width,
+                Margin = new Padding(0, 6, 0, 0)
+            };
+            bottomRow.Controls.Add(lblStatus);
+            bottomRow.Controls.Add(btnLogout);
+
+            // Add controls into central panel in logical order
+            flp.Controls.Add(lblWelcome);
+            flp.Controls.Add(btnCreateRoom);
+            flp.Controls.Add(lblJoin);
+            flp.Controls.Add(txtRoomCode);
+            flp.Controls.Add(btnJoinRoom);
+            flp.Controls.Add(bottomRow);
+
+            this.Controls.Add(flp);
+
+            // Position after adding
+            CenterContent();
+        }
+
+        private void CenterContent()
+        {
+            // Find the flow panel we added and center it
+            foreach (Control c in this.Controls)
+            {
+                if (c is FlowLayoutPanel)
+                {
+                    var flp = (FlowLayoutPanel)c;
+                    flp.Location = new Point((this.ClientSize.Width - flp.Width) / 2, (this.ClientSize.Height - flp.Height) / 2);
+                    // locate bottom row (horizontal) if exists
+                    FlowLayoutPanel bottom = null;
+                    foreach (Control cc in flp.Controls)
+                    {
+                        if (cc is FlowLayoutPanel flpBottom && flpBottom.FlowDirection == FlowDirection.LeftToRight)
+                        {
+                            bottom = flpBottom;
+                            break;
+                        }
+                    }
+
+                    // adjust child sizes
+                    foreach (Control child in flp.Controls)
+                    {
+                        if (child is TextBox tb)
+                            tb.Width = Math.Max(200, flp.Width - 20);
+                        if (child is Button btn && child.Parent == flp)
+                            btn.Width = Math.Max(120, flp.Width - 20);
+                    }
+
+                    if (bottom != null)
+                    {
+                        bottom.Width = flp.Width;
+                        // find logout button in bottom
+                        Button logoutBtn = null;
+                        foreach (Control b in bottom.Controls)
+                        {
+                            if (b is Button bb && bb.Text == "Đăng xuất") { logoutBtn = bb; break; }
+                        }
+
+                        if (logoutBtn != null)
+                        {
+                            // status occupies remaining width
+                            foreach (Control b in bottom.Controls)
+                            {
+                                if (b == lblStatus)
+                                {
+                                    b.Width = bottom.Width - logoutBtn.Width - 12;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // fallback: make lblStatus full width
+                            foreach (Control b in bottom.Controls)
+                            {
+                                if (b == lblStatus) b.Width = bottom.Width;
+                            }
+                        }
+                    }
+                }
+            }
+            // (logout now sits inside bottom row)
         }
 
         private void SubscribeEvents()
@@ -157,13 +281,15 @@ namespace DrawingClient.Forms
                 lblStatus.Text = $"Đã tạo phòng {payload.RoomCode}, đang vào phòng...";
 
                 // ✅ FIX: Pre-create MainForm trước khi gửi JOIN_ROOM (giống flow join thủ công)
-                var pendingMainForm = new MainForm(_network, payload.RoomCode);
+                var pendingMainForm = new MainForm(_network, payload.RoomCode, true);
                 Action<JoinRoomResponse> onceHandler = null;
                 onceHandler = (resp) =>
                 {
                     NetworkEvents.OnJoinRoomResponse -= onceHandler;
                     if (resp != null && resp.IsSuccess)
                     {
+                        pendingMainForm.SetRoomOwner(resp.IsRoomOwner);
+                        pendingMainForm.RegisterUdpEndpoint();
                         this.BeginInvoke(new Action(() =>
                         {
                             this.Hide();
@@ -202,7 +328,7 @@ namespace DrawingClient.Forms
             if (payload != null && payload.IsSuccess)
             {
                 lblStatus.Text = $"Đã vào phòng {payload.RoomCode}";
-                MainForm mainForm = new MainForm(_network, payload.RoomCode);
+                MainForm mainForm = new MainForm(_network, payload.RoomCode, payload.IsRoomOwner);
                 this.Hide();
                 mainForm.FormClosed += (s, e) => this.Close();
                 mainForm.Show();

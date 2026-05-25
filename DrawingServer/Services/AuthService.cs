@@ -21,11 +21,11 @@ namespace DrawingServer.Services
 
         public class UserSession
         {
-            public string Username { get; set; }
+            public string Username { get; set; } = "";
             public int UserId { get; set; }
-            public string AssignedColor { get; set; }
+            public string AssignedColor { get; set; } = "";
             public DateTime LoginTime { get; set; }
-            public string CurrentRoomCode { get; set; }
+            public string CurrentRoomCode { get; set; } = "";
         }
 
         /// <summary>
@@ -128,8 +128,11 @@ namespace DrawingServer.Services
         /// <summary>
         /// Get active user session info.
         /// </summary>
-        public static UserSession GetUserSession(string username)
+        public static UserSession? GetUserSession(string username)
         {
+            if (string.IsNullOrWhiteSpace(username))
+                return null;
+
             lock (_activeSessions)
             {
                 if (_activeSessions.TryGetValue(username, out var session))

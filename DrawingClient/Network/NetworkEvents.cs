@@ -61,7 +61,6 @@ namespace DrawingClient.Network
         // â”€â”€ AI FEATURES (Tuáº§n 5-6) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public static event Action<AiTextToImageResultPayload> OnAiTextToImageResult;
         public static event Action<AiBgRemovedPayload> OnAiBgRemovedResult;
-        public static event Action<AiAutoCompleteResultPayload> OnAiAutoCompleteResult;
 
         // â”€â”€ ADVANCED FEATURES (Tuáº§n 5-6) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public static event Action<StickerPayload> OnStickerReceived;
@@ -70,16 +69,12 @@ namespace DrawingClient.Network
         public static event Action<SpotlightPayload> OnSpotlightReceived;
         public static event Action<StickyNotePayload> OnStickyNoteReceived;
         public static event Action<StickyNoteReplyPayload> OnStickyNoteReplyReceived;
-        public static event Action<VoteResponsePayload> OnVoteResponse;
         public static event Action<TimelineResponsePayload> OnTimelineResponse;
         public static event Action<SnapshotListPayload> OnSnapshotListReceived;
 
-        // â”€â”€ GAMIFICATION (Tuáº§n 7-8) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        public static event Action<DrawingPromptPayload> OnDrawingPromptReceived;
-        public static event Action<BlindDrawPayload> OnBlindDrawReceived;
+        // â”€â”€ PIXEL ART / EXPORT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public static event Action<PixelArtDrawPayload> OnPixelArtDrawReceived;
         public static event Action<PixelArtSyncPayload> OnPixelArtSyncReceived;
-        public static event Action<GifExportProgressPayload> OnGifExportProgress;
 
         // â”€â”€ CONNECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         public static event Action OnDisconnected;
@@ -115,21 +110,16 @@ namespace DrawingClient.Network
         public static void RaisePublicLinkReceived(PublicGalleryLinkPayload p) => OnPublicLinkReceived?.Invoke(p);
         public static void RaiseAiTextToImageResult(AiTextToImageResultPayload p) => OnAiTextToImageResult?.Invoke(p);
         public static void RaiseAiBgRemovedResult(AiBgRemovedPayload p) => OnAiBgRemovedResult?.Invoke(p);
-        public static void RaiseAiAutoCompleteResult(AiAutoCompleteResultPayload p) => OnAiAutoCompleteResult?.Invoke(p);
         public static void RaiseStickerReceived(StickerPayload p) => OnStickerReceived?.Invoke(p);
         public static void RaiseFollowModeReceived(FollowModePayload p) => OnFollowModeReceived?.Invoke(p);
         public static void RaiseTurnBasedReceived(TurnBasedPayload p) => OnTurnBasedReceived?.Invoke(p);
         public static void RaiseSpotlightReceived(SpotlightPayload p) => OnSpotlightReceived?.Invoke(p);
         public static void RaiseStickyNoteReceived(StickyNotePayload p) => OnStickyNoteReceived?.Invoke(p);
         public static void RaiseStickyNoteReplyReceived(StickyNoteReplyPayload p) => OnStickyNoteReplyReceived?.Invoke(p);
-        public static void RaiseVoteResponse(VoteResponsePayload p) => OnVoteResponse?.Invoke(p);
         public static void RaiseTimelineResponse(TimelineResponsePayload p) => OnTimelineResponse?.Invoke(p);
         public static void RaiseSnapshotListReceived(SnapshotListPayload p) => OnSnapshotListReceived?.Invoke(p);
-        public static void RaiseDrawingPromptReceived(DrawingPromptPayload p) => OnDrawingPromptReceived?.Invoke(p);
-        public static void RaiseBlindDrawReceived(BlindDrawPayload p) => OnBlindDrawReceived?.Invoke(p);
         public static void RaisePixelArtDrawReceived(PixelArtDrawPayload p) => OnPixelArtDrawReceived?.Invoke(p);
         public static void RaisePixelArtSyncReceived(PixelArtSyncPayload p) => OnPixelArtSyncReceived?.Invoke(p);
-        public static void RaiseGifExportProgress(GifExportProgressPayload p) => OnGifExportProgress?.Invoke(p);
         public static void RaiseDisconnected() => OnDisconnected?.Invoke();
         public static void RaiseConnected() => OnConnected?.Invoke();
     }

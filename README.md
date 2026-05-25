@@ -12,7 +12,7 @@
 
 ## Current AI Scope
 
-- Enabled: text-to-image (Gemini), autocomplete (Gemini), remove background (Remove.bg).
+- Enabled: text-to-image (Gemini), remove background (Remove.bg).
 - Disabled by scope decision: magic erase.
 
 Đây là ứng dụng Vẽ Trực Tuyến Thời Gian Thực hỗ trợ nhiều người cùng kết nối, vẽ và trò chuyện trong một phòng chung. 

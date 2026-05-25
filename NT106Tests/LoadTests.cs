@@ -92,48 +92,7 @@ namespace NT106Tests
                 $"500 AES round-trip phai xong trong 5s, thuc te: {sw.ElapsedMilliseconds}ms");
         }
 
-        // ── Test 3: Gamification concurrent ─────────────────────
-        [TestMethod]
-        [Description("Test GamificationService: 10 user cộng điểm đồng thời không bị race condition")]
-        public void GamificationConcurrentScoring_10Users()
-        {
-            const int USER_COUNT = 10;
-            const int DRAWS_EACH = 100;
-            string roomCode = "LOAD_TEST_ROOM_" + Guid.NewGuid().ToString("N").Substring(0, 6);
-
-            for (int i = 0; i < USER_COUNT; i++)
-                DrawingServer.Services.GamificationService.EnsureUser(roomCode, $"User{i}");
-
-            var tasks = new List<Task>();
-            var sw = Stopwatch.StartNew();
-
-            for (int i = 0; i < USER_COUNT; i++)
-            {
-                int idx = i;
-                tasks.Add(Task.Run(() =>
-                {
-                    for (int j = 0; j < DRAWS_EACH; j++)
-                        DrawingServer.Services.GamificationService.AddScore(
-                            roomCode, $"User{idx}",
-                            DrawingServer.Services.GamificationService.POINTS_DRAW);
-                }));
-            }
-
-            Task.WaitAll(tasks.ToArray());
-            sw.Stop();
-
-            int expected = DRAWS_EACH * DrawingServer.Services.GamificationService.POINTS_DRAW;
-            for (int i = 0; i < USER_COUNT; i++)
-            {
-                int score = DrawingServer.Services.GamificationService.GetScore(roomCode, $"User{i}");
-                Assert.AreEqual(expected, score, $"User{i} phai co dung {expected} diem, thuc te: {score}");
-            }
-
-            Console.WriteLine($"[LoadTest] {USER_COUNT} users x {DRAWS_EACH} draws dong thoi: {sw.ElapsedMilliseconds}ms");
-            Assert.IsTrue(sw.ElapsedMilliseconds < 2000, "Concurrent scoring phai xong trong 2s");
-        }
-
-        // ── Test 4: Packet ảnh lớn ~100KB ────────────────────────
+        // ── Test 3: Packet ảnh lớn ~100KB ────────────────────────
         [TestMethod]
         [Description("Test serialize/encrypt packet ảnh lớn ~100KB (mô phỏng AI result)")]
         public void LargeImagePacket_SerializeAndEncrypt()

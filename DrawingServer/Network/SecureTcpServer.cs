@@ -39,6 +39,7 @@ namespace DrawingServer.Network
                 while (true)
                 {
                     TcpClient client = await _listener.AcceptTcpClientAsync();
+                    client.NoDelay = true;
                     Logger.Info("TCP", $"[+] Client mới: {client.Client.RemoteEndPoint}");
                     _ = Task.Run(() => HandleClientAsync(client));
                 }
@@ -62,7 +63,7 @@ namespace DrawingServer.Network
                 Clients.TryAdd(clientId, session);
 
                 // Gửi canvas size ngay khi kết nối
-                await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.CANVAS_SIZE, new CanvasSizePayload { Width = 1280, Height = 720 }));
+                await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.CANVAS_SIZE, new CanvasSizePayload { Width = 1920, Height = 1080 }));
 
                 while (true)
                 {
@@ -121,7 +122,7 @@ namespace DrawingServer.Network
 
                         case CommandType.CREATE_ROOM:
                             var roomData = PacketHelper.GetPayload<CreateRoomPayload>(packet);
-                            var createResult = await RoomService.CreateRoomAsync(session.Username ?? "guest", roomData?.CanvasWidth ?? 1280, roomData?.CanvasHeight ?? 720);
+                            var createResult = await RoomService.CreateRoomAsync(session.Username ?? "guest", roomData?.CanvasWidth ?? 1920, roomData?.CanvasHeight ?? 1080);
                             await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.CREATE_ROOM_RESPONSE, new CreateRoomResponse
                             {
                                 IsSuccess = createResult.Success,
@@ -151,7 +152,13 @@ namespace DrawingServer.Network
                                         exists = false;
                                 }
                                 await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.JOIN_ROOM_RESPONSE,
-                                    new JoinRoomResponse { IsSuccess = exists, RoomCode = joinData.RoomCode, Message = exists ? "OK" : "Lỗi" }));
+                                    new JoinRoomResponse
+                                    {
+                                        IsSuccess = exists,
+                                        RoomCode = joinData.RoomCode,
+                                        Message = exists ? "OK" : "Lỗi",
+                                        IsRoomOwner = string.Equals(RoomService.GetRoomState(joinData.RoomCode)?.OwnerId, session.Username, StringComparison.OrdinalIgnoreCase)
+                                    }));
 
                                 var joinResult = exists
                                     ? await RoomService.TryAddMemberToRoomAsync(joinData.RoomCode, session)
@@ -161,18 +168,6 @@ namespace DrawingServer.Network
                                 {
                                     session.RoomCode = joinData.RoomCode;
 
-                                    // Gamification: khởi tạo diem cho user moi join
-                                    GamificationService.EnsureUser(joinData.RoomCode, session.Username ?? "guest");
-
-                                    // Gui leaderboard hien tai cho user moi vao
-                                    var lbEntries = GamificationService.GetLeaderboard(joinData.RoomCode);
-                                    await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.LEADERBOARD,
-                                        new SharedLib.Payloads.LeaderboardPayload
-                                        {
-                                            RoomCode = joinData.RoomCode,
-                                            Entries = lbEntries.Select(e => new SharedLib.Payloads.LeaderboardEntry
-                                            { Rank = e.Rank, Username = e.Username, Score = e.Score }).ToList()
-                                        }));
                                     try
                                     {
                                         var members = RoomService.GetRoomMembersInfo(joinData.RoomCode);
@@ -192,8 +187,28 @@ namespace DrawingServer.Network
                                         }
                                             
                                         // Broadcast USER_JOIN cho các client khác trong phòng
-                                        await BroadcastToRoomAsync(joinData.RoomCode, PacketHelper.Create(CommandType.USER_JOIN, 
+                                        try
+                                        {
+                                            var recentChats = await DbManager.GetChatMessagesAsync(joinData.RoomCode, 50);
+                                            foreach (var chat in recentChats.OrderBy(c => c.SentAt))
+                                            {
+                                                await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.CHAT,
+                                                    new ChatPayload
+                                                    {
+                                                        Username = chat.Username,
+                                                        Message = chat.Message,
+                                                        Timestamp = new DateTimeOffset(chat.SentAt).ToUnixTimeMilliseconds()
+                                                    }));
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            Logger.Warning("TCP", $"[CHAT HISTORY] Skip for '{session.Username}': {ex.Message}");
+                                        }
+
+                                        await BroadcastToRoomAsync(joinData.RoomCode, PacketHelper.Create(CommandType.USER_JOIN,
                                             new UserJoinPayload { Username = session.Username ?? "guest" }), excludeClientId: clientId);
+                                        await BroadcastRoomMembersAsync(joinData.RoomCode);
                                     }
                                     catch { }
 
@@ -209,6 +224,7 @@ namespace DrawingServer.Network
                                     {
                                         Logger.Warning("TCP", $"[JOIN] Không có history cho phòng {joinData.RoomCode} — canvas sẽ trắng");
                                     }
+                                    await SendActionStackToClientAsync(session, joinData.RoomCode);
                                 }
                             }
                             break;
@@ -217,10 +233,32 @@ namespace DrawingServer.Network
                             if (!string.IsNullOrEmpty(session.RoomCode))
                             {
                                 string leavingRoom = session.RoomCode;
-                                try { RoomService.RemoveMemberFromRoom(session.RoomCode, session.Username ?? "unknown"); } catch { }
+                                string leavingUsername = session.Username ?? "unknown";
+                                var roomStateBeforeLeave = RoomService.GetRoomState(leavingRoom);
+                                bool wasActiveTurnUser = roomStateBeforeLeave != null &&
+                                    roomStateBeforeLeave.IsTurnBasedEnabled &&
+                                    string.Equals(roomStateBeforeLeave.ActiveDrawingUser, leavingUsername, StringComparison.OrdinalIgnoreCase);
+
+                                try { RoomService.RemoveMemberFromRoom(session.RoomCode, leavingUsername); } catch { }
                                 await BroadcastToRoomAsync(session.RoomCode,
-                                    PacketHelper.Create(CommandType.USER_LEAVE, new UserLeavePayload { Username = session.Username ?? "unknown" }),
+                                    PacketHelper.Create(CommandType.USER_LEAVE, new UserLeavePayload { Username = leavingUsername }),
                                     excludeClientId: clientId);
+
+                                string autoAdvanceMessage = string.Empty;
+                                if (wasActiveTurnUser && RoomService.TryAdvanceTurnAfterMemberRemoval(leavingRoom, leavingUsername, out string nextActiveUser, out bool turnChanged, out autoAdvanceMessage) && turnChanged)
+                                {
+                                    var turnPacket = PacketHelper.Create(CommandType.TURN_CHANGE, new TurnBasedPayload
+                                    {
+                                        RoomCode = leavingRoom,
+                                        Username = leavingUsername,
+                                        IsEnabled = true,
+                                        ActiveUser = nextActiveUser
+                                    });
+                                    await BroadcastToRoomAsync(leavingRoom, turnPacket, excludeClientId: clientId);
+                                    PublishCrossServerEvent(leavingRoom, turnPacket, leavingUsername);
+                                }
+
+                                await BroadcastRoomMembersAsync(leavingRoom);
                                 session.RoomCode = "";
                                 session.UdpEndPoint = null;
                                 Logger.Info("TCP", $"[LEAVE] '{session.Username}' rời phòng {leavingRoom}");
@@ -236,7 +274,7 @@ namespace DrawingServer.Network
                                 try { await DbManager.SaveChatMessageAsync(session.RoomCode, chatData.Username, chatData.Message); } catch { }
                                 Logger.Info("TCP", $"[CHAT] '{session.Username}' → room={session.RoomCode} msg='{chatData.Message}'");
                                 await BroadcastToRoomAsync(session.RoomCode, packet);
-                                PublishCrossServerEvent(session.RoomCode, packet, session.Username);
+                                PublishCrossServerEvent(session.RoomCode, packet, session.Username ?? "");
                             }
                             else
                             {
@@ -244,7 +282,77 @@ namespace DrawingServer.Network
                             }
                             break;
 
-                        // ── Broadcast cho TẤT CẢ trong phòng (kể cả người gửi) ──
+                        // Realtime interaction over TCP fallback.
+                        case CommandType.CURSOR:
+                            if (!string.IsNullOrEmpty(session.RoomCode))
+                            {
+                                var cursorData = PacketHelper.GetPayload<CursorPayload>(packet) ?? new CursorPayload();
+                                cursorData.Username = session.Username ?? "unknown";
+                                packet = PacketHelper.Create(CommandType.CURSOR, cursorData);
+                                await BroadcastToRoomAsync(session.RoomCode, packet, excludeClientId: clientId);
+                            }
+                            break;
+
+                        case CommandType.LASER:
+                            if (!string.IsNullOrEmpty(session.RoomCode))
+                            {
+                                var laserData = PacketHelper.GetPayload<LaserPayload>(packet) ?? new LaserPayload();
+                                laserData.Username = session.Username ?? "unknown";
+                                packet = PacketHelper.Create(CommandType.LASER, laserData);
+                                await BroadcastToRoomAsync(session.RoomCode, packet, excludeClientId: clientId);
+                            }
+                            break;
+
+                        // Drawing commands are broadcast first, then saved in the background.
+                        case CommandType.DRAW:
+                        case CommandType.FLOOD_FILL:
+                        case CommandType.TEXT:
+                        case CommandType.SPRAY:
+                            if (!string.IsNullOrEmpty(session.RoomCode))
+                            {
+                                if (IsTurnBlocked(session)) break;
+
+                                string roomCodeForSave = session.RoomCode;
+                                string usernameForSave = session.Username ?? "unknown";
+                                string actionIdForSave = Guid.NewGuid().ToString();
+                                string strokeJsonForSave = "";
+
+                                try
+                                {
+                                    string drawJson = Encoding.UTF8.GetString(packet.Payload);
+                                    var drawObj = Newtonsoft.Json.Linq.JObject.Parse(drawJson);
+                                    drawObj["Username"] = usernameForSave;
+                                    if (string.IsNullOrWhiteSpace(drawObj["ToolType"]?.ToString()))
+                                    {
+                                        if (packet.Cmd == CommandType.FLOOD_FILL)
+                                            drawObj["ToolType"] = "FloodFill";
+                                        else if (packet.Cmd == CommandType.TEXT)
+                                            drawObj["ToolType"] = "Text";
+                                        else if (packet.Cmd == CommandType.SPRAY)
+                                            drawObj["ToolType"] = "Spray";
+                                        else
+                                            drawObj["ToolType"] = "Pen";
+                                    }
+                                    string actionId = drawObj["ActionID"]?.ToString() ?? "";
+                                    actionId = Guid.TryParse(actionId, out var parsedActionId) ? parsedActionId.ToString() : actionIdForSave;
+                                    drawObj["ActionID"] = actionId;
+                                    packet.Payload = Encoding.UTF8.GetBytes(drawObj.ToString());
+                                    actionIdForSave = actionId;
+                                    strokeJsonForSave = drawObj.ToString();
+                                }
+                                catch (Exception ex)
+                                {
+                                    Logger.Warning("TCP", $"[DRAW TCP] Khong parse duoc stroke: {ex.Message}");
+                                }
+
+                                await BroadcastToRoomAsync(session.RoomCode, packet, excludeClientId: clientId);
+                                if (!string.IsNullOrWhiteSpace(strokeJsonForSave))
+                                    _ = SaveStrokeFastPathAsync(roomCodeForSave, actionIdForSave, strokeJsonForSave, usernameForSave);
+                                PublishCrossServerEvent(session.RoomCode, packet, session.Username ?? "");
+
+                            }
+                            break;
+
                         case CommandType.STICKER:
                             if (!string.IsNullOrEmpty(session.RoomCode))
                             {
@@ -256,18 +364,14 @@ namespace DrawingServer.Network
                                     string stickerJson = Encoding.UTF8.GetString(packet.Payload);
                                     var stickerObj = Newtonsoft.Json.Linq.JObject.Parse(stickerJson);
                                     stickerObj["ToolType"] = "Sticker";
-                                    string actionId = stickerObj["ActionID"]?.ToString();
+                                    string actionId = stickerObj["ActionID"]?.ToString() ?? "";
                                     actionId = string.IsNullOrWhiteSpace(actionId) ? Guid.NewGuid().ToString() : actionId;
                                     await DbManager.SaveStrokeAsync(session.RoomCode, actionId, stickerObj.ToString(), session.Username ?? "");
                                 }
                                 catch { }
 
                                 await BroadcastToRoomAsync(session.RoomCode, packet, excludeClientId: clientId);
-                                PublishCrossServerEvent(session.RoomCode, packet, session.Username);
-                                // Gamification: +3 diem khi dat sticker
-                                int stickerScore = GamificationService.AddScore(session.RoomCode, session.Username ?? "", GamificationService.POINTS_STICKER);
-                                await BroadcastToRoomAsync(session.RoomCode, PacketHelper.Create(CommandType.SCORE_UPDATE,
-                                    new SharedLib.Payloads.ScoreUpdatePayload { RoomCode = session.RoomCode, Username = session.Username, Score = stickerScore, Delta = GamificationService.POINTS_STICKER, Reason = "sticker" }));
+                                PublishCrossServerEvent(session.RoomCode, packet, session.Username ?? "");
                             }
                             break;
 
@@ -275,10 +379,26 @@ namespace DrawingServer.Network
                         case CommandType.REDO:
                         case CommandType.FOLLOW_MODE:
                         case CommandType.SET_TURNBASED:
+                        case CommandType.TURN_CHANGE:
                             if (!string.IsNullOrEmpty(session.RoomCode))
                             {
                                 if ((packet.Cmd == CommandType.UNDO || packet.Cmd == CommandType.REDO) && IsTurnBlocked(session))
                                     break;
+
+                                if (packet.Cmd == CommandType.UNDO)
+                                {
+                                    var undoData = PacketHelper.GetPayload<UndoPayload>(packet) ?? new UndoPayload();
+                                    undoData.Username = session.Username ?? "";
+                                    packet = PacketHelper.Create(CommandType.UNDO, undoData);
+                                    await DbManager.SaveActionStackAsync(session.RoomCode, Newtonsoft.Json.JsonConvert.SerializeObject(undoData), isUndo: true);
+                                }
+                                else if (packet.Cmd == CommandType.REDO)
+                                {
+                                    var redoData = PacketHelper.GetPayload<RedoPayload>(packet) ?? new RedoPayload();
+                                    redoData.Username = session.Username ?? "";
+                                    packet = PacketHelper.Create(CommandType.REDO, redoData);
+                                    await DbManager.SaveActionStackAsync(session.RoomCode, Newtonsoft.Json.JsonConvert.SerializeObject(redoData), isUndo: false);
+                                }
 
                                 if (packet.Cmd == CommandType.SET_TURNBASED)
                                 {
@@ -299,9 +419,26 @@ namespace DrawingServer.Network
                                     });
                                     Logger.Info("TCP", $"[TURN_BASED] {(turnData.IsEnabled ? "ON" : "OFF")} active='{session.Username}' phòng {session.RoomCode}");
                                 }
+                                else if (packet.Cmd == CommandType.TURN_CHANGE)
+                                {
+                                    if (!RoomService.TryAdvanceTurn(session.RoomCode, session.Username ?? "", out string nextActiveUser, out string message))
+                                    {
+                                        Logger.Warning("TCP", $"[TURN_CHANGE] Bỏ qua từ '{session.Username}': {message}");
+                                        break;
+                                    }
+
+                                    packet = PacketHelper.Create(CommandType.TURN_CHANGE, new TurnBasedPayload
+                                    {
+                                        RoomCode = session.RoomCode,
+                                        Username = session.Username ?? "",
+                                        IsEnabled = true,
+                                        ActiveUser = nextActiveUser
+                                    });
+                                    Logger.Info("TCP", $"[TURN_CHANGE] '{session.Username}' chuyển lượt sang '{nextActiveUser}' phòng {session.RoomCode}");
+                                }
 
                                 await BroadcastToRoomAsync(session.RoomCode, packet);
-                                PublishCrossServerEvent(session.RoomCode, packet, session.Username);
+                                PublishCrossServerEvent(session.RoomCode, packet, session.Username ?? "");
                             }
                             break;
 
@@ -316,7 +453,12 @@ namespace DrawingServer.Network
                                 if (IsTurnBlocked(session)) break;
 
                                 // Xóa lịch sử vẽ trong DB để người join sau không nhận history cũ
-                                try { await DbManager.ClearRoomHistoryAsync(session.RoomCode); } catch { }
+                                try
+                                {
+                                    await DbManager.ClearRoomHistoryAsync(session.RoomCode);
+                                    await DbManager.ClearActionStackAsync(session.RoomCode);
+                                }
+                                catch { }
                                 // Broadcast cho tất cả NGOẠI TRỪ người gửi (họ đã clear local rồi)
                                 await BroadcastToRoomAsync(session.RoomCode, packet, excludeClientId: clientId);
                                 Logger.Info("TCP", $"[CLEAR_ALL] '{session.Username}' xóa canvas phòng {session.RoomCode}");
@@ -343,13 +485,13 @@ namespace DrawingServer.Network
                                     string bgJson = Encoding.UTF8.GetString(packet.Payload);
                                     var bgObj = Newtonsoft.Json.Linq.JObject.Parse(bgJson);
                                     bgObj["ToolType"] = "SetBackground";
-                                    string actionId = bgObj["ActionID"]?.ToString();
+                                    string actionId = bgObj["ActionID"]?.ToString() ?? "";
                                     actionId = string.IsNullOrWhiteSpace(actionId) ? Guid.NewGuid().ToString() : actionId;
                                     await DbManager.SaveStrokeAsync(session.RoomCode, actionId, bgObj.ToString(), session.Username ?? "");
                                 }
                                 catch { }
                                 await BroadcastToRoomAsync(session.RoomCode, packet, excludeClientId: clientId);
-                                PublishCrossServerEvent(session.RoomCode, packet, session.Username);
+                                PublishCrossServerEvent(session.RoomCode, packet, session.Username ?? "");
                             }
                             break;
 
@@ -364,11 +506,15 @@ namespace DrawingServer.Network
                                     string imgJson = Encoding.UTF8.GetString(packet.Payload);
                                     var imgObj = Newtonsoft.Json.Linq.JObject.Parse(imgJson);
                                     imgObj["ToolType"] = "ImportImage";
-                                    await DbManager.SaveStrokeAsync(session.RoomCode, Guid.NewGuid().ToString(), imgObj.ToString(), session.Username ?? "");
+                                    string actionId = imgObj["ActionID"]?.ToString() ?? "";
+                                    actionId = Guid.TryParse(actionId, out var parsedActionId) ? parsedActionId.ToString() : Guid.NewGuid().ToString();
+                                    imgObj["ActionID"] = actionId;
+                                    packet.Payload = Encoding.UTF8.GetBytes(imgObj.ToString());
+                                    await DbManager.SaveStrokeAsync(session.RoomCode, actionId, imgObj.ToString(), session.Username ?? "");
                                 }
                                 catch { }
                                 await BroadcastToRoomAsync(session.RoomCode, packet, excludeClientId: clientId);
-                                PublishCrossServerEvent(session.RoomCode, packet, session.Username);
+                                PublishCrossServerEvent(session.RoomCode, packet, session.Username ?? "");
                             }
                             break;
 
@@ -376,7 +522,7 @@ namespace DrawingServer.Network
                             if (!string.IsNullOrEmpty(session.RoomCode))
                             {
                                 await BroadcastToRoomAsync(session.RoomCode, packet, excludeClientId: clientId);
-                                PublishCrossServerEvent(session.RoomCode, packet, session.Username);
+                                PublishCrossServerEvent(session.RoomCode, packet, session.Username ?? "");
                             }
                             break;
 
@@ -385,16 +531,23 @@ namespace DrawingServer.Network
                             {
                                 var aiTtiData = PacketHelper.GetPayload<SharedLib.Payloads.AiTextToImageResultPayload>(packet);
                                 if (aiTtiData != null)
-                                    _ = DbManager.SaveAiResultAsync(
+                                {
+                                    PersistAiImageInBackground(
                                         session.RoomCode,
                                         "text_to_image",
                                         aiTtiData.Prompt ?? "",
                                         aiTtiData.ImageData ?? "",
+                                        aiTtiData.ActionID,
                                         session.Username ?? "",
-                                        provider: "gemini",
-                                        model: SharedLib.AI.ApiConfig.GeminiImageModel);
-                                await BroadcastToRoomAsync(session.RoomCode, packet);
-                                PublishCrossServerEvent(session.RoomCode, packet, session.Username);
+                                        aiTtiData.X,
+                                        aiTtiData.Y,
+                                        aiTtiData.Width,
+                                        aiTtiData.Height,
+                                        provider: "huggingface",
+                                        model: SharedLib.AI.ApiConfig.HuggingFaceImageModel);
+                                }
+                                await BroadcastToRoomAsync(session.RoomCode, packet, excludeClientId: clientId);
+                                PublishCrossServerEvent(session.RoomCode, packet, session.Username ?? "");
                             }
                             break;
 
@@ -403,34 +556,23 @@ namespace DrawingServer.Network
                             {
                                 var aiBgData = PacketHelper.GetPayload<SharedLib.Payloads.AiBgRemovedPayload>(packet);
                                 if (aiBgData != null)
-                                    _ = DbManager.SaveAiResultAsync(
+                                {
+                                    PersistAiImageInBackground(
                                         session.RoomCode,
                                         "bg_removed",
                                         "",
                                         aiBgData.ImageData ?? "",
+                                        aiBgData.ActionID,
                                         session.Username ?? "",
+                                        aiBgData.X,
+                                        aiBgData.Y,
+                                        aiBgData.Width,
+                                        aiBgData.Height,
                                         provider: "remove.bg",
                                         model: "");
-                                await BroadcastToRoomAsync(session.RoomCode, packet);
-                                PublishCrossServerEvent(session.RoomCode, packet, session.Username);
-                            }
-                            break;
-
-                        case CommandType.AI_AUTOCOMPLETE:
-                            if (!string.IsNullOrEmpty(session.RoomCode))
-                            {
-                                var aiAcData = PacketHelper.GetPayload<SharedLib.Payloads.AiAutoCompleteResultPayload>(packet);
-                                if (aiAcData != null)
-                                    _ = DbManager.SaveAiResultAsync(
-                                        session.RoomCode,
-                                        "autocomplete",
-                                        "",
-                                        aiAcData.ResultImageData ?? "",
-                                        session.Username ?? "",
-                                        provider: "gemini",
-                                        model: SharedLib.AI.ApiConfig.GeminiImageModel);
-                                await BroadcastToRoomAsync(session.RoomCode, packet);
-                                PublishCrossServerEvent(session.RoomCode, packet, session.Username);
+                                }
+                                await BroadcastToRoomAsync(session.RoomCode, packet, excludeClientId: clientId);
+                                PublishCrossServerEvent(session.RoomCode, packet, session.Username ?? "");
                             }
                             break;
 
@@ -516,25 +658,6 @@ namespace DrawingServer.Network
                                         PacketHelper.Create(CommandType.PUBLIC_GALLERY_LINK,
                                             new PublicGalleryLinkPayload { PublicToken = "", PublicUrl = "" }));
                                 }
-                            }
-                            break;
-
-                        case CommandType.EXPORT_GIF_REQUEST:
-                            if (!string.IsNullOrEmpty(session.RoomCode))
-                            {
-                                _ = Task.Run(async () =>
-                                {
-                                    for (int i = 10; i <= 100; i += 30)
-                                    {
-                                        await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.GIF_EXPORT_PROGRESS, new GifExportProgressPayload
-                                        {
-                                            ProgressPercent = i,
-                                            Status = i == 100 ? "completed" : "processing",
-                                            GifData = i == 100 ? "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" : ""
-                                        }));
-                                        await Task.Delay(800);
-                                    }
-                                });
                             }
                             break;
 
@@ -660,8 +783,9 @@ namespace DrawingServer.Network
                 if (!string.IsNullOrEmpty(session.RoomCode))
                 {
                     try { 
-                        RoomService.RemoveMemberFromRoom(session.RoomCode, session.Username ?? "unknown"); 
+                        RoomService.RemoveMemberFromRoom(session.RoomCode, session.Username ?? "unknown");
                         _ = BroadcastToRoomAsync(session.RoomCode, PacketHelper.Create(CommandType.USER_LEAVE, new UserLeavePayload { Username = session.Username ?? "unknown" }), excludeClientId: clientId);
+                        _ = BroadcastRoomMembersAsync(session.RoomCode);
                     } catch { }
                 }
                 try { AuthService.LogoutUser(session.Username ?? "unknown"); } catch { }
@@ -684,6 +808,7 @@ namespace DrawingServer.Network
             {
                 await client.SecureStream.WriteAsync(lenBytes, 0, 4);
                 await client.SecureStream.WriteAsync(data, 0, data.Length);
+                await client.SecureStream.FlushAsync();
             }
             catch (Exception ex)
             {
@@ -709,6 +834,33 @@ namespace DrawingServer.Network
             }
         }
 
+        public static async Task<int> BroadcastPacketToRoomWithoutUdpEndpointStaticAsync(
+            string roomCode,
+            Packet packet,
+            string excludeUsername = "")
+        {
+            if (string.IsNullOrWhiteSpace(roomCode) || packet == null)
+                return 0;
+
+            int count = 0;
+            foreach (var kvp in Clients)
+            {
+                ClientSession client = kvp.Value;
+                if (!string.Equals(client.RoomCode, roomCode, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (client.UdpEndPoint != null)
+                    continue;
+                if (!string.IsNullOrWhiteSpace(excludeUsername) &&
+                    string.Equals(client.Username, excludeUsername, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                await SendPacketToClientStaticAsync(client, packet);
+                count++;
+            }
+
+            return count;
+        }
+
         private static async Task SendPacketToClientStaticAsync(ClientSession client, Packet packet)
         {
             if (client?.SecureStream == null)
@@ -723,6 +875,7 @@ namespace DrawingServer.Network
             {
                 await client.SecureStream.WriteAsync(lenBytes, 0, 4);
                 await client.SecureStream.WriteAsync(data, 0, data.Length);
+                await client.SecureStream.FlushAsync();
             }
             catch { }
             finally
@@ -739,6 +892,118 @@ namespace DrawingServer.Network
         }
 
         // ✅ Broadcast đến tất cả client trong phòng — mỗi client dùng WriteLock riêng
+        private static async Task SaveStrokeFastPathAsync(string roomCode, string actionId, string strokeJson, string username)
+        {
+            try
+            {
+                await DbManager.SaveStrokeAsync(roomCode, actionId, strokeJson, username ?? "");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("TCP", $"[DRAW TCP] Luu nen that bai: {ex.Message}");
+            }
+        }
+
+        private static async Task SaveAiImageStrokeAsync(
+            string roomCode,
+            string actionId,
+            string username,
+            string imageData,
+            int x,
+            int y,
+            int width,
+            int height)
+        {
+            if (string.IsNullOrWhiteSpace(roomCode) || string.IsNullOrWhiteSpace(imageData))
+                return;
+
+            string safeActionId = Guid.TryParse(actionId, out Guid parsedId)
+                ? parsedId.ToString()
+                : Guid.NewGuid().ToString();
+
+            var imageObj = new Newtonsoft.Json.Linq.JObject
+            {
+                ["ActionID"] = safeActionId,
+                ["Username"] = username ?? "",
+                ["ToolType"] = "ImportImage",
+                ["X"] = x,
+                ["Y"] = y,
+                ["Width"] = Math.Max(1, width),
+                ["Height"] = Math.Max(1, height),
+                ["ImageData"] = imageData,
+                ["Timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            };
+
+            await DbManager.SaveStrokeAsync(roomCode, safeActionId, imageObj.ToString(), username ?? "");
+        }
+
+        private static void PersistAiImageInBackground(
+            string roomCode,
+            string aiType,
+            string prompt,
+            string imageData,
+            string actionId,
+            string username,
+            int x,
+            int y,
+            int width,
+            int height,
+            string provider,
+            string model)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await DbManager.SaveAiResultAsync(
+                        roomCode,
+                        aiType,
+                        prompt ?? "",
+                        imageData ?? "",
+                        username ?? "",
+                        provider: provider ?? "",
+                        model: model ?? "");
+
+                    await SaveAiImageStrokeAsync(
+                        roomCode,
+                        actionId,
+                        username ?? "",
+                        imageData ?? "",
+                        x,
+                        y,
+                        width,
+                        height);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning("TCP", $"[AI] Luu ket qua {aiType} that bai: {ex.Message}");
+                }
+            });
+        }
+
+        private async Task SendActionStackToClientAsync(ClientSession session, string roomCode)
+        {
+            var actionStack = await DbManager.GetActionStackEntriesAsync(roomCode);
+            foreach (var entry in actionStack)
+            {
+                if (string.IsNullOrWhiteSpace(entry.ActionJson))
+                    continue;
+
+                if (entry.IsUndo)
+                {
+                    var undo = Newtonsoft.Json.JsonConvert.DeserializeObject<UndoPayload>(entry.ActionJson);
+                    if (undo != null && !string.IsNullOrWhiteSpace(undo.ActionID))
+                        await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.UNDO, undo));
+                }
+                else
+                {
+                    var redo = Newtonsoft.Json.JsonConvert.DeserializeObject<RedoPayload>(entry.ActionJson);
+                    if (redo != null && !string.IsNullOrWhiteSpace(redo.ActionID))
+                        await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.REDO, redo));
+                }
+            }
+        }
+
         private async Task BroadcastToRoomAsync(string roomCode, Packet packet, string excludeClientId = "")
         {
             int count = 0;
@@ -757,6 +1022,21 @@ namespace DrawingServer.Network
                 foreach (var kvp in Clients)
                     Logger.Info("TCP", $"  → Client '{kvp.Value.Username}' RoomCode='{kvp.Value.RoomCode}' excluded={kvp.Key == excludeClientId}");
             }
+        }
+
+        private Task BroadcastRoomMembersAsync(string roomCode)
+        {
+            if (string.IsNullOrWhiteSpace(roomCode))
+                return Task.CompletedTask;
+
+            var members = RoomService.GetRoomMembersInfo(roomCode);
+            var payload = new RoomMembersPayload
+            {
+                RoomCode = roomCode,
+                Members = members
+            };
+
+            return BroadcastToRoomAsync(roomCode, PacketHelper.Create(CommandType.ROOM_MEMBERS, payload));
         }
 
         private async Task<bool> ReadExactAsync(SslStream stream, byte[] buffer, int count)

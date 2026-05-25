@@ -64,7 +64,6 @@
     <Compile Include="Forms\LobbyForm.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="AI\GeminiClient.cs" />
     <Compile Include="AI\RemoveBgClient.cs" />
     <Compile Include="AI\StabilityAiClient.cs" />
     <Compile Include="AI\VoiceClient.cs" />

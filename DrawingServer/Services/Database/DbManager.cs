@@ -9,6 +9,12 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
 {
     public static class DbManager
     {
+        public sealed class ActionStackEntry
+        {
+            public string ActionJson { get; set; } = "";
+            public bool IsUndo { get; set; }
+        }
+
         // Nhớ kiểm tra lại mật khẩu Database của bạn (đang để mặc định là 123456)
         private static string connString => EnvLoader.GetRequired("DATABASE_URL");
 
@@ -72,7 +78,7 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
                 var userIdObj = await cmdUserId.ExecuteScalarAsync();
 
                 if (userIdObj == null) 
-                    return null; // Không tìm thấy user
+                    return "";
 
                 int userId = Convert.ToInt32(userIdObj);
 
@@ -98,7 +104,31 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
             catch (Exception ex)
             {
                 SharedLib.Logging.Logger.Error("DB", "Lỗi tạo phòng: " + ex.Message);
-                return null;
+                return "";
+            }
+        }
+
+        public static async Task<string> GetRoomOwnerUsernameAsync(string roomCode)
+        {
+            try
+            {
+                using var conn = new NpgsqlConnection(connString);
+                await conn.OpenAsync();
+
+                using var cmd = new NpgsqlCommand(
+                    @"SELECT u.username
+                      FROM rooms r
+                      INNER JOIN users u ON u.id = r.owner_id
+                      WHERE r.room_code = @c", conn);
+                cmd.Parameters.AddWithValue("c", roomCode);
+
+                var ownerUsername = await cmd.ExecuteScalarAsync() as string;
+                return ownerUsername ?? string.Empty;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("DB", $"GetRoomOwnerUsernameAsync loi: {ex.Message}");
+                return string.Empty;
             }
         }
 
@@ -281,14 +311,15 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
         private static async Task EnsureGalleryTableAsync(NpgsqlConnection conn)
         {
             using var cmd = new NpgsqlCommand(
-                @"CREATE TABLE IF NOT EXISTS Gallery (
+                @"CREATE EXTENSION IF NOT EXISTS pgcrypto;
+                CREATE TABLE IF NOT EXISTS Gallery (
                     id SERIAL PRIMARY KEY,
                     room_id INT REFERENCES Rooms(id) ON DELETE CASCADE,
                     filename VARCHAR(255) NOT NULL,
                     image_data TEXT NOT NULL,
                     created_by VARCHAR(50),
                     created_at TIMESTAMPTZ DEFAULT NOW(),
-                    public_token VARCHAR(100) UNIQUE
+                    public_token VARCHAR(64) UNIQUE DEFAULT gen_random_uuid()::TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_gallery_room_id ON Gallery(room_id);
                 CREATE INDEX IF NOT EXISTS idx_gallery_public_token ON Gallery(public_token);",
@@ -413,6 +444,29 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
         }
 
         /// <summary>Save chat message</summary>
+        public static async Task ClearActionStackAsync(string roomCode)
+        {
+            try
+            {
+                using var conn = new NpgsqlConnection(connString);
+                await conn.OpenAsync();
+
+                using var cmdRoom = new NpgsqlCommand("SELECT id FROM Rooms WHERE room_code = @c", conn);
+                cmdRoom.Parameters.AddWithValue("c", roomCode);
+                var roomIdObj = await cmdRoom.ExecuteScalarAsync();
+                if (roomIdObj == null || roomIdObj == DBNull.Value) return;
+                int roomId = Convert.ToInt32(roomIdObj);
+
+                using var cmd = new NpgsqlCommand("DELETE FROM ActionStack WHERE room_id = @r", conn);
+                cmd.Parameters.AddWithValue("r", roomId);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("DB", $"ClearActionStackAsync loi: {ex.Message}");
+            }
+        }
+
         public static async Task<bool> SaveChatMessageAsync(string roomCode, string username, string message)
         {
             try
@@ -422,9 +476,9 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
 
                 using var cmdRoom = new NpgsqlCommand("SELECT id FROM Rooms WHERE room_code = @c", conn);
                 cmdRoom.Parameters.AddWithValue("c", roomCode);
-                var roomId = await cmdRoom.ExecuteScalarAsync() as int?;
-
-                if (roomId == null) return false;
+                var roomIdObj = await cmdRoom.ExecuteScalarAsync();
+                if (roomIdObj == null || roomIdObj == DBNull.Value) return false;
+                int roomId = Convert.ToInt32(roomIdObj);
 
                 using var cmdInsert = new NpgsqlCommand(
                     "INSERT INTO ChatHistory (room_id, username, message, sent_at) VALUES (@r, @u, @m, NOW())",
@@ -584,9 +638,9 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
 
                 using var cmdRoom = new NpgsqlCommand("SELECT id FROM Rooms WHERE room_code = @c", conn);
                 cmdRoom.Parameters.AddWithValue("c", roomCode);
-                var roomId = await cmdRoom.ExecuteScalarAsync() as int?;
-
-                if (roomId == null) return actions;
+                var roomIdObj = await cmdRoom.ExecuteScalarAsync();
+                if (roomIdObj == null || roomIdObj == DBNull.Value) return actions;
+                int roomId = Convert.ToInt32(roomIdObj);
 
                 using var cmd = new NpgsqlCommand(
                     "SELECT action_data FROM ActionStack WHERE room_id = @r ORDER BY created_at ASC",
@@ -596,6 +650,38 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
                 while (await reader.ReadAsync())
                 {
                     actions.Add(reader.GetString(0));
+                }
+            }
+            catch { }
+            return actions;
+        }
+
+        public static async Task<List<ActionStackEntry>> GetActionStackEntriesAsync(string roomCode)
+        {
+            var actions = new List<ActionStackEntry>();
+            try
+            {
+                using var conn = new NpgsqlConnection(connString);
+                await conn.OpenAsync();
+
+                using var cmdRoom = new NpgsqlCommand("SELECT id FROM Rooms WHERE room_code = @c", conn);
+                cmdRoom.Parameters.AddWithValue("c", roomCode);
+                var roomIdObj = await cmdRoom.ExecuteScalarAsync();
+                if (roomIdObj == null || roomIdObj == DBNull.Value) return actions;
+                int roomId = Convert.ToInt32(roomIdObj);
+
+                using var cmd = new NpgsqlCommand(
+                    "SELECT action_data, is_undo FROM ActionStack WHERE room_id = @r ORDER BY id ASC",
+                    conn);
+                cmd.Parameters.AddWithValue("r", roomId);
+                using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    actions.Add(new ActionStackEntry
+                    {
+                        ActionJson = reader.GetString(0),
+                        IsUndo = reader.GetBoolean(1)
+                    });
                 }
             }
             catch { }

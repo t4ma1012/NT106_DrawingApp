@@ -3,6 +3,7 @@
     public enum ToolType
     {
         Pen,
+        Mouse,
         Line,
         Rectangle,
         Circle,

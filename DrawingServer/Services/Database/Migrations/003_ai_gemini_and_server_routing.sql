@@ -1,5 +1,5 @@
 -- 003_ai_gemini_and_server_routing.sql
--- Server registry, event log, AI metadata, and GIF job tracking.
+-- Server registry, event log, and AI metadata.
 
 CREATE TABLE IF NOT EXISTS ServerNodes (
     id SERIAL PRIMARY KEY,
@@ -31,31 +31,8 @@ CREATE TABLE IF NOT EXISTS RoomEvents (
 CREATE INDEX IF NOT EXISTS idx_room_events_room_id_id ON RoomEvents(room_id, id);
 CREATE INDEX IF NOT EXISTS idx_room_events_event_type ON RoomEvents(event_type);
 
-CREATE TABLE IF NOT EXISTS ClientRateLimits (
-    room_id INT REFERENCES Rooms(id) ON DELETE CASCADE,
-    username VARCHAR(50) NOT NULL,
-    window_started_at TIMESTAMPTZ NOT NULL,
-    udp_packets INT DEFAULT 0,
-    tcp_packets INT DEFAULT 0,
-    ai_requests INT DEFAULT 0,
-    PRIMARY KEY (room_id, username, window_started_at)
-);
-
-CREATE INDEX IF NOT EXISTS idx_client_rate_limits_room_user
-ON ClientRateLimits(room_id, username);
-
-CREATE TABLE IF NOT EXISTS GifExports (
-    id BIGSERIAL PRIMARY KEY,
-    room_id INT REFERENCES Rooms(id) ON DELETE CASCADE,
-    requested_by VARCHAR(50),
-    filename VARCHAR(255),
-    status VARCHAR(30) DEFAULT 'pending',
-    progress_percent INT DEFAULT 0,
-    gif_data TEXT,
-    error_message TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    completed_at TIMESTAMPTZ
-);
+-- ClientRateLimits was a placeholder table and is not used by active code.
+-- Existing databases drop it in 004_drop_unused_tables.sql.
 
 ALTER TABLE AiResults
 ADD COLUMN IF NOT EXISTS provider VARCHAR(40) DEFAULT 'gemini',

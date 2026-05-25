@@ -9,7 +9,7 @@ namespace DrawingClient.Drawing
         private TextBox inputTextBox;
         private PictureBox canvas;
         private Action<string, Point, Color> onTextConfirmed;
-        private Point clickLocation;
+        private Point clickCanvasLocation;
         private Color textColor;
 
         public TextTool(PictureBox pictureBox, Action<string, Point, Color> confirmAction)
@@ -30,11 +30,11 @@ namespace DrawingClient.Drawing
             canvas.Controls.Add(inputTextBox);
         }
 
-        public void StartTyping(Point location, Color color)
+        public void StartTyping(Point canvasLocation, Point screenLocation, Color color)
         {
-            clickLocation = location;
+            clickCanvasLocation = canvasLocation;
             textColor = color;
-            inputTextBox.Location = location;
+            inputTextBox.Location = screenLocation;
             inputTextBox.Text = "";
             inputTextBox.ForeColor = color;
             inputTextBox.Visible = true;
@@ -45,7 +45,7 @@ namespace DrawingClient.Drawing
         {
             if (inputTextBox.Visible && !string.IsNullOrWhiteSpace(inputTextBox.Text))
             {
-                onTextConfirmed?.Invoke(inputTextBox.Text, clickLocation, textColor);
+                onTextConfirmed?.Invoke(inputTextBox.Text, clickCanvasLocation, textColor);
             }
             inputTextBox.Visible = false;
         }

@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using Npgsql;
 
 namespace LoadBalancer
 {
@@ -27,6 +30,8 @@ namespace LoadBalancer
         private readonly List<ServerInfo> _servers = new List<ServerInfo>();
         private readonly object _lock = new object();
         private TcpListener _listener;
+        public string RoutingStrategy { get; set; } = "room-affinity";
+        public string DatabaseUrl { get; set; } = "";
 
         public void AddServer(string host, int tcpPort, int udpPort, string name, string serverId = "")
         {
@@ -67,6 +72,7 @@ namespace LoadBalancer
 
         private async Task HandleClientAsync(TcpClient clientConn)
         {
+            clientConn.NoDelay = true;
             string clientIp = ((IPEndPoint)clientConn.Client.RemoteEndPoint).Address.ToString();
             NetworkStream clientStream = clientConn.GetStream();
 
@@ -90,7 +96,9 @@ namespace LoadBalancer
             string probeText = Encoding.ASCII.GetString(probe, 0, read);
             if (probeText.StartsWith("ROUTE", StringComparison.OrdinalIgnoreCase))
             {
-                ServerInfo routeTarget = SelectServer();
+                string routeLine = await ReadAsciiLineAsync(clientStream, probeText, 256);
+                string roomCode = ExtractRouteRoomCode(routeLine);
+                ServerInfo routeTarget = await SelectServerForRouteAsync(roomCode);
                 if (routeTarget == null)
                 {
                     await SendRouteErrorAsync(clientStream, "no_healthy_server");
@@ -109,7 +117,14 @@ namespace LoadBalancer
                 return;
             }
 
-            ServerInfo target = SelectServer();
+            bool hasRelayPreface = probeText.StartsWith("RELAY", StringComparison.OrdinalIgnoreCase);
+            string relayLine = hasRelayPreface
+                ? await ReadAsciiLineAsync(clientStream, probeText, 256)
+                : "";
+
+            ServerInfo target = hasRelayPreface
+                ? SelectServerById(ExtractRelayServerId(relayLine)) ?? SelectServer()
+                : SelectServer();
             if (target == null)
             {
                 clientConn.Close();
@@ -119,6 +134,7 @@ namespace LoadBalancer
             try
             {
                 using var serverConn = new TcpClient();
+                serverConn.NoDelay = true;
                 await serverConn.ConnectAsync(target.Host, target.TcpPort);
 
                 lock (_lock)
@@ -127,8 +143,11 @@ namespace LoadBalancer
                 }
 
                 NetworkStream serverStream = serverConn.GetStream();
-                await serverStream.WriteAsync(probe, 0, read);
-                await serverStream.FlushAsync();
+                if (!hasRelayPreface)
+                {
+                    await serverStream.WriteAsync(probe, 0, read);
+                    await serverStream.FlushAsync();
+                }
 
                 Console.WriteLine($"[LB] PROXY {clientIp} -> {target.Name} ({target.ActiveProxyConnections} active)");
 
@@ -154,6 +173,17 @@ namespace LoadBalancer
         {
             lock (_lock)
             {
+                if (string.Equals(RoutingStrategy, "primary", StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (var s in _servers)
+                    {
+                        if (s.IsHealthy)
+                            return s;
+                    }
+
+                    return null;
+                }
+
                 ServerInfo best = null;
                 foreach (var s in _servers)
                 {
@@ -173,6 +203,118 @@ namespace LoadBalancer
                 }
                 return best;
             }
+        }
+
+        private ServerInfo SelectServerById(string serverId)
+        {
+            if (string.IsNullOrWhiteSpace(serverId))
+                return null;
+
+            lock (_lock)
+            {
+                foreach (var s in _servers)
+                {
+                    if (s.IsHealthy && string.Equals(s.ServerId, serverId, StringComparison.OrdinalIgnoreCase))
+                        return s;
+                }
+            }
+
+            return null;
+        }
+
+        private async Task<ServerInfo> SelectServerForRouteAsync(string roomCode)
+        {
+            string ownerServerId = await GetRoomOwnerServerIdAsync(roomCode);
+            ServerInfo owner = SelectServerById(ownerServerId);
+            if (owner != null)
+                return owner;
+
+            return SelectServer();
+        }
+
+        private async Task<string> GetRoomOwnerServerIdAsync(string roomCode)
+        {
+            if (string.IsNullOrWhiteSpace(roomCode) || string.IsNullOrWhiteSpace(DatabaseUrl))
+                return "";
+
+            try
+            {
+                using var conn = new NpgsqlConnection(NormalizeNpgsqlConnectionString(DatabaseUrl));
+                await conn.OpenAsync();
+
+                using var cmd = new NpgsqlCommand(
+                    "SELECT owner_server_id FROM Rooms WHERE room_code = @room_code LIMIT 1",
+                    conn);
+                cmd.Parameters.AddWithValue("room_code", roomCode.Trim());
+                object result = await cmd.ExecuteScalarAsync();
+                return result == null || result == DBNull.Value ? "" : Convert.ToString(result) ?? "";
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[LB] Room owner lookup failed for {roomCode}: {ex.Message}");
+                return "";
+            }
+        }
+
+        private static string NormalizeNpgsqlConnectionString(string connectionString)
+        {
+            if (string.IsNullOrWhiteSpace(connectionString))
+                return "";
+
+            string normalized = connectionString.Trim();
+            normalized = normalized.Replace("SslMode=", "SSL Mode=");
+            normalized = normalized.Replace("sslmode=", "SSL Mode=");
+            normalized = normalized.Replace("Ssl Mode=", "SSL Mode=");
+            normalized = normalized.Replace("TrustServerCertificate=", "Trust Server Certificate=");
+            return normalized;
+        }
+
+        private static async Task<string> ReadAsciiLineAsync(NetworkStream stream, string initialText, int maxChars)
+        {
+            var sb = new StringBuilder(initialText ?? "");
+            byte[] one = new byte[1];
+
+            while (sb.Length < maxChars && sb.ToString().IndexOf('\n') < 0)
+            {
+                int read = await stream.ReadAsync(one, 0, 1);
+                if (read <= 0)
+                    break;
+                sb.Append((char)one[0]);
+            }
+
+            return sb.ToString().Trim();
+        }
+
+        private static string ExtractRouteRoomCode(string routeLine)
+        {
+            if (string.IsNullOrWhiteSpace(routeLine))
+                return "";
+
+            string[] parts = routeLine.Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2)
+                return "";
+
+            string value = parts[1].Trim();
+            const string roomPrefix = "room=";
+            if (value.StartsWith(roomPrefix, StringComparison.OrdinalIgnoreCase))
+                value = value.Substring(roomPrefix.Length);
+            return value;
+        }
+
+        private static string ExtractRelayServerId(string relayLine)
+        {
+            if (string.IsNullOrWhiteSpace(relayLine))
+                return "";
+
+            string[] parts = relayLine.Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2)
+                return "";
+
+            string value = parts[1].Trim();
+            const string idPrefix = "server=";
+            if (value.StartsWith(idPrefix, StringComparison.OrdinalIgnoreCase))
+                value = value.Substring(idPrefix.Length);
+            return value;
         }
 
         private static async Task SendRouteResponseAsync(NetworkStream stream, ServerInfo server)
@@ -268,7 +410,12 @@ namespace LoadBalancer
             {
                 using var tcp = new TcpClient();
                 var connectTask = tcp.ConnectAsync(host, port);
-                return await Task.WhenAny(connectTask, Task.Delay(1500)) == connectTask && tcp.Connected;
+                if (await Task.WhenAny(connectTask, Task.Delay(1500)) != connectTask || !tcp.Connected)
+                    return false;
+
+                using var ssl = new SslStream(tcp.GetStream(), false, (sender, cert, chain, errors) => true);
+                var authTask = ssl.AuthenticateAsClientAsync("DrawingServer", null, SslProtocols.Tls12, false);
+                return await Task.WhenAny(authTask, Task.Delay(1500)) == authTask && ssl.IsAuthenticated;
             }
             catch
             {

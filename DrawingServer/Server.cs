@@ -58,7 +58,7 @@ namespace DrawingServer
                 Console.WriteLine($"[INFO] Da gan mau {session.AssignedColor} cho {clientId}");
 
                 // Gửi kích thước Canvas cho Client mới bằng Packet của B
-                string canvasJson = "{\"Width\":1280, \"Height\":720}";
+                string canvasJson = "{\"Width\":1920, \"Height\":1080}";
                 Packet canvasPacket = new Packet
                 {
                     Cmd = CommandType.CANVAS_SIZE,

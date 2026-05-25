@@ -19,8 +19,8 @@ namespace DrawingServer.Services
 
         private static string _connString = "";
         private static string _serverId = "";
-        private static NpgsqlConnection _listenConn;
-        private static CancellationTokenSource _cts;
+        private static NpgsqlConnection? _listenConn;
+        private static CancellationTokenSource? _cts;
         private static volatile bool _started;
 
         private sealed class NotifyPayload
@@ -151,7 +151,7 @@ SELECT pg_notify(@channel, @notify_payload);";
                 if (string.IsNullOrWhiteSpace(e.Payload))
                     return;
 
-                NotifyPayload payload = JsonConvert.DeserializeObject<NotifyPayload>(e.Payload);
+                NotifyPayload? payload = JsonConvert.DeserializeObject<NotifyPayload>(e.Payload);
                 if (payload == null || string.IsNullOrWhiteSpace(payload.event_id))
                     return;
 

@@ -48,7 +48,11 @@ namespace SharedLib.Config
 
                     string value = line.Substring(sep + 1).Trim();
                     value = Unquote(value);
-                    Environment.SetEnvironmentVariable(key, value, EnvironmentVariableTarget.Process);
+                    string existingValue = Environment.GetEnvironmentVariable(key);
+                    if (string.IsNullOrWhiteSpace(existingValue))
+                    {
+                        Environment.SetEnvironmentVariable(key, value, EnvironmentVariableTarget.Process);
+                    }
                     LoadedKeys.Add(key);
                 }
 

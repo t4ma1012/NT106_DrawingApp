@@ -11,6 +11,7 @@ using SharedLib.Logging;
 using System.Net.Security;
 using System.Security.Authentication;
 using Newtonsoft.Json;
+using SharedLib.Config;
 
 namespace DrawingClient.Network
 {
@@ -21,24 +22,28 @@ namespace DrawingClient.Network
         private Thread _receiveThread;
         private Thread _heartbeatThread;
         private volatile bool _running = false;
+        private string _lastPassword = "";
 
         // Heartbeat
         private long _lastHeartbeatReceived = 0;
-        private const int HEARTBEAT_INTERVAL_SEC = 30;
-        private const int HEARTBEAT_TIMEOUT_SEC = 10;
+        private const int HEARTBEAT_INTERVAL_SEC = 15;
+        private const int HEARTBEAT_TIMEOUT_SEC = 60;
 
         public string CurrentUsername { get; private set; }
         public string CurrentRoomCode { get; private set; }
         public string ServerIp { get; private set; } = "127.0.0.1";
         public int ServerTcpPort { get; private set; } = 8888;
         public int ServerUdpPort { get; private set; } = 8889;
+        public bool PreferTcpRealtime { get; set; }
+        public string AssignedServerId { get; private set; } = "";
         public bool IsConnected => _tcpClient?.Connected ?? false;
 
-        public void SetAssignedServer(string serverIp, int tcpPort, int udpPort)
+        public void SetAssignedServer(string serverIp, int tcpPort, int udpPort, string serverId = "")
         {
             ServerIp = string.IsNullOrWhiteSpace(serverIp) ? "127.0.0.1" : serverIp.Trim();
             ServerTcpPort = tcpPort > 0 ? tcpPort : 8888;
             ServerUdpPort = udpPort > 0 ? udpPort : 8889;
+            AssignedServerId = serverId ?? "";
         }
 
         // ── CONNECT / DISCONNECT ────────────────────────────────
@@ -50,6 +55,7 @@ namespace DrawingClient.Network
                 ServerIp = string.IsNullOrWhiteSpace(ip) ? "127.0.0.1" : ip.Trim();
                 ServerTcpPort = port;
                 _tcpClient = new TcpClient();
+                _tcpClient.NoDelay = true;
                 _tcpClient.Connect(ServerIp, port);
 
                 if (useSSL)
@@ -82,6 +88,115 @@ namespace DrawingClient.Network
                 Logger.Error("ClientNetwork", $"Lỗi kết nối: {ex.Message}");
                 return false;
             }
+        }
+
+        public bool ConnectRelay(string lbHost, int lbPort, string serverId)
+        {
+            try
+            {
+                ServerIp = string.IsNullOrWhiteSpace(lbHost) ? "127.0.0.1" : lbHost.Trim();
+                ServerTcpPort = lbPort;
+                AssignedServerId = serverId ?? "";
+
+                _tcpClient = new TcpClient();
+                _tcpClient.NoDelay = true;
+                _tcpClient.Connect(ServerIp, lbPort);
+
+                var rawStream = _tcpClient.GetStream();
+                if (!string.IsNullOrWhiteSpace(serverId))
+                {
+                    byte[] preface = Encoding.ASCII.GetBytes($"RELAY server={serverId.Trim()}\n");
+                    rawStream.Write(preface, 0, preface.Length);
+                    rawStream.Flush();
+                }
+
+                var ssl = new SslStream(rawStream, false, (s, cert, chain, err) => true);
+                ssl.AuthenticateAsClient("DrawingServer", null, SslProtocols.Tls12, false);
+                _stream = ssl;
+                Logger.Info("ClientNetwork", $"Kết nối LB relay thành công. target={serverId}");
+
+                _running = true;
+                _lastHeartbeatReceived = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+                _receiveThread = new Thread(ReceiveLoop) { IsBackground = true, Name = "TCP-Recv" };
+                _receiveThread.Start();
+
+                _heartbeatThread = new Thread(HeartbeatLoop) { IsBackground = true, Name = "TCP-Heartbeat" };
+                _heartbeatThread.Start();
+
+                NetworkEvents.RaiseConnected();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("ClientNetwork", $"Lỗi kết nối relay: {ex.Message}");
+                return false;
+            }
+        }
+
+        public async System.Threading.Tasks.Task<bool> ReconnectToRoomOwnerViaLoadBalancerAsync(string roomCode)
+        {
+            if (string.IsNullOrWhiteSpace(roomCode) ||
+                string.IsNullOrWhiteSpace(CurrentUsername) ||
+                string.IsNullOrWhiteSpace(_lastPassword))
+            {
+                return true;
+            }
+
+            bool useLoadBalancer = EnvLoader.Get("USE_LOAD_BALANCER_ROUTING", "1") != "0";
+            string lbMode = EnvLoader.Get("LOAD_BALANCER_CLIENT_MODE", "relay").Trim().ToLowerInvariant();
+            if (!useLoadBalancer || lbMode != "relay")
+                return true;
+
+            string lbHost = ServerIp;
+            int lbPort = ServerTcpPort > 0 ? ServerTcpPort : EnvLoader.GetInt("LOAD_BALANCER_PORT", 9000);
+
+            ServerRouteInfo route;
+            try
+            {
+                route = await LoadBalancerRouteClient.ResolveAsync(lbHost, lbPort, 2500, roomCode);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("ClientNetwork", $"Không resolve được room route {roomCode}: {ex.Message}");
+                return true;
+            }
+
+            if (string.IsNullOrWhiteSpace(route.ServerId) ||
+                string.Equals(route.ServerId, AssignedServerId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var loginWait = new System.Threading.Tasks.TaskCompletionSource<bool>();
+            Action<LoginResponse> loginHandler = null;
+            loginHandler = response =>
+            {
+                NetworkEvents.OnLoginResponse -= loginHandler;
+                loginWait.TrySetResult(response != null && response.IsSuccess);
+            };
+
+            Disconnect();
+            PreferTcpRealtime = true;
+            SetAssignedServer(lbHost, lbPort, route.UdpPort, route.ServerId);
+
+            if (!ConnectRelay(lbHost, lbPort, route.ServerId))
+            {
+                NetworkEvents.OnLoginResponse -= loginHandler;
+                return false;
+            }
+
+            NetworkEvents.OnLoginResponse += loginHandler;
+            SendLogin(CurrentUsername, _lastPassword);
+
+            var completed = await System.Threading.Tasks.Task.WhenAny(loginWait.Task, System.Threading.Tasks.Task.Delay(3500));
+            if (completed != loginWait.Task)
+            {
+                NetworkEvents.OnLoginResponse -= loginHandler;
+                return false;
+            }
+
+            return loginWait.Task.Result;
         }
 
         private void HeartbeatLoop()
@@ -160,10 +275,11 @@ namespace DrawingClient.Network
         public void SendLogin(string username, string password)
         {
             CurrentUsername = username;
+            _lastPassword = password ?? "";
             Send(CommandType.LOGIN, new LoginPayload { Username = username, Password = password });
         }
         public void SendRegister(string username, string password) => Send(CommandType.REGISTER, new RegisterPayload { Username = username, Password = password });
-        public void SendCreateRoom(int canvasWidth = 1280, int canvasHeight = 720) => Send(CommandType.CREATE_ROOM, new CreateRoomPayload { CanvasWidth = canvasWidth, CanvasHeight = canvasHeight });
+        public void SendCreateRoom(int canvasWidth = 1920, int canvasHeight = 1080) => Send(CommandType.CREATE_ROOM, new CreateRoomPayload { CanvasWidth = canvasWidth, CanvasHeight = canvasHeight });
         public void SendJoinRoom(string roomCode, bool isSpectator = false)
         {
             CurrentRoomCode = roomCode;
@@ -175,10 +291,15 @@ namespace DrawingClient.Network
         public void SendUndo(string actionId) => Send(CommandType.UNDO, new UndoPayload { ActionID = actionId, Username = CurrentUsername });
         public void SendRedo(string actionId) => Send(CommandType.REDO, new RedoPayload { ActionID = actionId, Username = CurrentUsername });
         public void SendChat(string message, int colorArgb = 0) => Send(CommandType.CHAT, new ChatPayload { Username = CurrentUsername, ColorARGB = colorArgb, Message = message, Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
+        public void SendCursorRealtime(CursorPayload payload) => Send(CommandType.CURSOR, payload);
+        public void SendLaserRealtime(LaserPayload payload) => Send(CommandType.LASER, payload);
+        public void SendDrawRealtime(DrawPayload payload) => Send(CommandType.DRAW, payload);
+        public void SendFloodFillRealtime(FloodFillPayload payload) => Send(CommandType.FLOOD_FILL, payload);
+        public void SendTextRealtime(DrawPayload payload) => Send(CommandType.TEXT, payload);
         public void SendSticker(StickerPayload payload) => Send(CommandType.STICKER, payload);
         public void SendStickyNote(StickyNotePayload payload) => Send(CommandType.STICKY_NOTE, payload);
         public void SendFollowMode(string targetUsername, bool isFollowing) => Send(CommandType.FOLLOW_MODE, new FollowModePayload { FollowerUsername = CurrentUsername, TargetUsername = targetUsername, IsFollowing = isFollowing });
-        public void SendExportGifRequest(int fpsFrames = 10, long startTimestamp = 0, long endTimestamp = 0) => Send(CommandType.EXPORT_GIF_REQUEST, new GifExportRequestPayload { RoomCode = CurrentRoomCode, FpsFrames = fpsFrames, Filename = $"drawing_{DateTime.Now:yyyyMMdd_HHmmss}.gif", StartTimestamp = startTimestamp, EndTimestamp = endTimestamp });
+        public void SendTurnChange(TurnBasedPayload payload) => Send(CommandType.TURN_CHANGE, payload);
         public void SendGetGallery() => Send(CommandType.GET_GALLERY, new GetGalleryPayload { RoomCode = CurrentRoomCode });
         public void SendSaveGallery(string filename, string imageData, string thumbnailData) => Send(CommandType.SAVE_TO_GALLERY, new SaveGalleryPayload { RoomCode = CurrentRoomCode, Username = CurrentUsername, Filename = filename, ImageData = imageData, ThumbnailData = thumbnailData });
 
@@ -280,8 +401,12 @@ namespace DrawingClient.Network
                                         {
                                             actions.Add(new DrawAction
                                             {
+                                                ActionID  = item["ActionID"]?.ToString() ?? item["actionId"]?.ToString() ?? "",
+                                                Username  = item["Username"]?.ToString() ?? item["username"]?.ToString() ?? "",
                                                 ToolType  = "SetBackground",
-                                                ColorARGB = item["ColorARGB"]?.ToObject<int>() ?? 0
+                                                ColorARGB = item["ColorARGB"]?.ToObject<int>() ?? 0,
+                                                ImageData = item["ImageData"]?.ToString() ?? "",
+                                                Timestamp = item["Timestamp"]?.ToObject<long>() ?? 0
                                             });
                                         }
                                         else if (toolType.Equals("ImportImage", StringComparison.OrdinalIgnoreCase))
@@ -289,12 +414,16 @@ namespace DrawingClient.Network
                                             // ImportImagePayload dùng X/Y, map sang X1/Y1
                                             actions.Add(new DrawAction
                                             {
+                                                ActionID    = item["ActionID"]?.ToString() ?? item["actionId"]?.ToString() ?? "",
+                                                Username    = item["Username"]?.ToString() ?? item["username"]?.ToString() ?? "",
                                                 ToolType    = "ImportImage",
                                                 X1          = item["X"]?.ToObject<int>() ?? item["X1"]?.ToObject<int>() ?? 0,
                                                 Y1          = item["Y"]?.ToObject<int>() ?? item["Y1"]?.ToObject<int>() ?? 0,
                                                 ImageWidth  = item["Width"]?.ToObject<int>() ?? 400,
                                                 ImageHeight = item["Height"]?.ToObject<int>() ?? 300,
-                                                ImageData   = item["ImageData"]?.ToString() ?? ""
+                                                ImageData   = item["ImageData"]?.ToString() ?? "",
+                                                IsDeleted   = item["IsDeleted"]?.ToObject<bool>() ?? false,
+                                                Timestamp   = item["Timestamp"]?.ToObject<long>() ?? 0
                                             });
                                         }
                                         else if (toolType.Equals("Sticker", StringComparison.OrdinalIgnoreCase))
@@ -302,12 +431,16 @@ namespace DrawingClient.Network
                                             // StickerPayload: StickerID map sang Text, X/Y map sang X1/Y1
                                             actions.Add(new DrawAction
                                             {
+                                                ActionID    = item["ActionID"]?.ToString() ?? item["actionId"]?.ToString() ?? "",
+                                                Username    = item["Username"]?.ToString() ?? item["username"]?.ToString() ?? "",
                                                 ToolType    = "Sticker",
                                                 Text        = item["StickerID"]?.ToString() ?? "",
                                                 X1          = item["X"]?.ToObject<int>() ?? 0,
                                                 Y1          = item["Y"]?.ToObject<int>() ?? 0,
                                                 ImageWidth  = item["Width"]?.ToObject<int>() ?? 64,
                                                 ImageHeight = item["Height"]?.ToObject<int>() ?? 64,
+                                                IsDeleted   = item["IsDeleted"]?.ToObject<bool>() ?? false,
+                                                Timestamp   = item["Timestamp"]?.ToObject<long>() ?? 0
                                             });
                                         }
                                         else
@@ -318,6 +451,8 @@ namespace DrawingClient.Network
                                             {
                                                 actions.Add(new DrawAction
                                                 {
+                                                    ActionID  = dp.ActionID,
+                                                    Username  = dp.Username,
                                                     ToolType  = dp.ToolType,
                                                     X1        = dp.X1,
                                                     Y1        = dp.Y1,
@@ -327,7 +462,9 @@ namespace DrawingClient.Network
                                                     Thickness = dp.Thickness,
                                                     Text      = dp.Text,
                                                     FontName  = dp.FontName,
-                                                    FontSize  = dp.FontSize
+                                                    FontSize  = dp.FontSize,
+                                                    IsDeleted = dp.IsDeleted,
+                                                    Timestamp = dp.Timestamp
                                                 });
                                             }
                                         }
@@ -370,6 +507,12 @@ namespace DrawingClient.Network
                     case CommandType.CHAT:
                         NetworkEvents.RaiseChatReceived(PacketHelper.GetPayload<ChatPayload>(p));
                         break;
+                    case CommandType.CURSOR:
+                        NetworkEvents.RaiseCursorReceived(PacketHelper.GetPayload<CursorPayload>(p));
+                        break;
+                    case CommandType.LASER:
+                        NetworkEvents.RaiseLaserReceived(PacketHelper.GetPayload<LaserPayload>(p));
+                        break;
                     case CommandType.STICKER:
                         NetworkEvents.RaiseStickerReceived(PacketHelper.GetPayload<StickerPayload>(p));
                         break;
@@ -392,8 +535,11 @@ namespace DrawingClient.Network
                     case CommandType.IMPORT_IMAGE:
                         NetworkEvents.RaiseImportImageReceived(PacketHelper.GetPayload<ImportImagePayload>(p));
                         break;
-                    case CommandType.GIF_EXPORT_PROGRESS:
-                        NetworkEvents.RaiseGifExportProgress(PacketHelper.GetPayload<GifExportProgressPayload>(p));
+                    case CommandType.AI_TEXT_TO_IMAGE:
+                        NetworkEvents.RaiseAiTextToImageResult(PacketHelper.GetPayload<AiTextToImageResultPayload>(p));
+                        break;
+                    case CommandType.AI_BG_REMOVED:
+                        NetworkEvents.RaiseAiBgRemovedResult(PacketHelper.GetPayload<AiBgRemovedPayload>(p));
                         break;
                     case CommandType.DISCONNECT:
                         _running = false;

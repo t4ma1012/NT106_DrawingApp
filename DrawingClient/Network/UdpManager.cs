@@ -54,6 +54,9 @@ namespace DrawingClient.Network
         {
             try
             {
+                if (_socket == null)
+                    return;
+
                 string json = JsonConvert.SerializeObject(payload);
                 byte[] payloadBytes = Encoding.UTF8.GetBytes(json);
                 Packet packet = new Packet { Cmd = cmd, Payload = payloadBytes };
@@ -67,14 +70,29 @@ namespace DrawingClient.Network
         }
 
         public void SendDraw(DrawPayload p) => SendPacket(CommandType.DRAW, p);
+        public void SendText(DrawPayload p) => SendPacket(CommandType.TEXT, p);
         public void SendFloodFill(FloodFillPayload p) => SendPacket(CommandType.FLOOD_FILL, p);
         public void SendSetBackground(SetBackgroundPayload p) => SendPacket(CommandType.SET_BACKGROUND, p);
         public void SendSticker(StickerPayload p) => SendPacket(CommandType.STICKER, p);
         public void SendChat(ChatPayload p) => SendPacket(CommandType.CHAT, p);
         public void SendTurnBased(TurnBasedPayload p) => SendPacket(CommandType.SET_TURNBASED, p);
+        public void SendTurnChange(TurnBasedPayload p) => SendPacket(CommandType.TURN_CHANGE, p);
         public void SendCursor(CursorPayload p) => SendPacket(CommandType.CURSOR, p);
         public void SendLaser(LaserPayload p) => SendPacket(CommandType.LASER, p);
         public void SendReaction(ReactionPayload p) => SendPacket(CommandType.REACTION, p);
+
+        public void RegisterEndpoint(string username, string roomCode)
+        {
+            if (string.IsNullOrWhiteSpace(username))
+                return;
+
+            SendPacket(CommandType.UDP_PING, new
+            {
+                Username = username,
+                RoomCode = roomCode,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            });
+        }
 
         // ── NHẬN ────────────────────────────────────────────
 

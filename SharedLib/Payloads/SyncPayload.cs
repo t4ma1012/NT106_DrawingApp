@@ -24,6 +24,7 @@ namespace SharedLib.Payloads
         public string ImageData { get; set; }  // base64, dùng cho ImportImage
         public int ImageWidth { get; set; }
         public int ImageHeight { get; set; }
+        public bool IsDeleted { get; set; }
         public long Timestamp { get; set; }
         public bool IsAiGenerated { get; set; } = false;
     }

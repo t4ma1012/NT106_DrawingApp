@@ -12,7 +12,9 @@ namespace DrawingServer
         static async Task Main(string[] args)
         {
             EnvLoader.Load();
-            Logger.Initialize("server_logs.txt");
+            string serverId = EnvLoader.Get("SERVER_ID", "server-1");
+            string logFile = EnvLoader.Get("SERVER_LOG_FILE", $"server_logs_{serverId}.txt");
+            Logger.Initialize(logFile);
             Console.WriteLine("Khoi dong Drawing Server...");
 
             string pfxPath = EnvLoader.Get("SERVER_CERT_PATH", "server.pfx");

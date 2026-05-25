@@ -1,10 +1,8 @@
 ﻿// ============================================================
 // SharedLib/Payloads/InteractionPayload.cs
 // Tất cả payload tương tác: cursor, laser, emoji, chat, log,
-// spotlight, follow, sticker, sticky note, vote (Tuần 2-6)
+// spotlight, follow, sticker, sticky note (Tuần 2-6)
 // ============================================================
-using System.Collections.Generic;
-
 namespace SharedLib.Payloads
 {
     // ── Tuần 2 ──────────────────────────────────────────────
@@ -62,6 +60,7 @@ namespace SharedLib.Payloads
         public int Width { get; set; }
         public int Height { get; set; }
         public float Rotation { get; set; }    // độ
+        public bool IsDeleted { get; set; }
         public long Timestamp { get; set; }
     }
 
@@ -94,6 +93,8 @@ namespace SharedLib.Payloads
         public string AuthorUsername { get; set; }
         public int X { get; set; }
         public int Y { get; set; }
+        public int Width { get; set; }
+        public int Height { get; set; }
         public string Text { get; set; }
         public bool IsOpen { get; set; } = true;
         public long Timestamp { get; set; }
@@ -108,38 +109,6 @@ namespace SharedLib.Payloads
     }
 
     // ── Tuần 6 ──────────────────────────────────────────────
-
-    /// <summary>Voting / Like nét vẽ — hover vào vùng → nhấn 👍 vote.</summary>
-    public class VoteDrawPayload
-    {
-        public string ActionID { get; set; }   // ActionID của nét vẽ được vote
-        public string VoterUsername { get; set; }
-    }
-
-    public class VoteResponsePayload
-    {
-        public string ActionID { get; set; }
-        public int TotalVotes { get; set; }
-        public List<string> Voters { get; set; } = new List<string>();
-    }
-
-    // ── Tuần 7-8 ────────────────────────────────────────────
-
-    /// <summary>Drawing Prompt — server gửi chủ đề, đếm ngược, vote.</summary>
-    public class DrawingPromptPayload
-    {
-        public string PromptText { get; set; }
-        public int CountdownSeconds { get; set; } = 60;
-        public bool IsStart { get; set; }
-        public bool IsEnd { get; set; }
-    }
-
-    /// <summary>Blind Drawing Mode — mỗi người chỉ thấy phần mình vẽ.</summary>
-    public class BlindDrawPayload
-    {
-        public bool IsReveal { get; set; }  // false = start, true = reveal tất cả
-        public string RoomCode { get; set; }
-    }
 
     public class TurnBasedPayload
     {

@@ -33,5 +33,27 @@ namespace NT106Tests
             Environment.SetEnvironmentVariable(key, null, EnvironmentVariableTarget.Process);
             Assert.ThrowsException<InvalidOperationException>(() => EnvLoader.GetRequired(key));
         }
+
+        [TestMethod]
+        public void Load_DoesNotOverrideExistingProcessVariables()
+        {
+            string tempPath = Path.GetTempFileName();
+            string key = "TEST_OVERRIDE_" + Guid.NewGuid().ToString("N");
+
+            try
+            {
+                Environment.SetEnvironmentVariable(key, "from-process", EnvironmentVariableTarget.Process);
+                File.WriteAllText(tempPath, key + "=from-file\n");
+
+                EnvLoader.Load(tempPath, reload: true);
+
+                Assert.AreEqual("from-process", EnvLoader.Get(key));
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(key, null, EnvironmentVariableTarget.Process);
+                try { File.Delete(tempPath); } catch { }
+            }
+        }
     }
 }

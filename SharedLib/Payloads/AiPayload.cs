@@ -33,26 +33,4 @@ namespace SharedLib.Payloads
         public long Timestamp { get; set; }
     }
 
-    public class AiAutoCompleteRequestPayload
-    {
-        public string RequesterUsername { get; set; }
-        public string OriginalImageData { get; set; }
-        public string MaskImageData { get; set; }
-        public int RegionX { get; set; }
-        public int RegionY { get; set; }
-        public int RegionWidth { get; set; }
-        public int RegionHeight { get; set; }
-    }
-
-    public class AiAutoCompleteResultPayload
-    {
-        public string RequesterUsername { get; set; }
-        public string ActionID { get; set; }
-        public string ResultImageData { get; set; }
-        public int X { get; set; }
-        public int Y { get; set; }
-        public int Width { get; set; }
-        public int Height { get; set; }
-        public long Timestamp { get; set; }
-    }
 }

@@ -23,7 +23,10 @@ namespace LoadBalancer
             EnvLoader.Load();
 
             int listenPort = EnvLoader.GetInt("LOAD_BALANCER_PORT", 9000);
+            string strategy = EnvLoader.Get("LOAD_BALANCER_STRATEGY", "room-affinity");
             var lb = new DrawingLoadBalancer();
+            lb.RoutingStrategy = string.IsNullOrWhiteSpace(strategy) ? "room-affinity" : strategy.Trim();
+            lb.DatabaseUrl = EnvLoader.Get("DATABASE_URL", "");
 
             int added = TryLoadServersFromJson(lb);
             if (added == 0)
@@ -31,6 +34,7 @@ namespace LoadBalancer
                 AddServersFromEnv(lb);
             }
 
+            Console.WriteLine($"[LB] Routing strategy: {lb.RoutingStrategy}");
             Console.WriteLine("[LB] Ctrl+C to stop.");
             await lb.StartAsync(listenPort);
         }

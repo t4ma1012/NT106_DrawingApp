@@ -9,8 +9,8 @@ namespace SharedLib.Payloads
 {
     public class CreateRoomPayload
     {
-        public int CanvasWidth { get; set; } = 1280;
-        public int CanvasHeight { get; set; } = 720;
+        public int CanvasWidth { get; set; } = 1920;
+        public int CanvasHeight { get; set; } = 1080;
     }
 
     public class CreateRoomResponse
@@ -40,6 +40,7 @@ namespace SharedLib.Payloads
         public int CanvasWidth { get; set; }
         public int CanvasHeight { get; set; }
         public int AssignedColorARGB { get; set; }
+        public bool IsRoomOwner { get; set; }
     }
 
     public class RoomMembersPayload

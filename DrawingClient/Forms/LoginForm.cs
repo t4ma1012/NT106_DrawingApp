@@ -139,12 +139,16 @@ namespace DrawingClient.Forms
             if (string.IsNullOrWhiteSpace(serverIp))
                 serverIp = "127.0.0.1";
 
-            int directTcpPort = EnvLoader.GetInt("SERVER_TCP_PORT", 8888);
             int lbPort = EnvLoader.GetInt("LOAD_BALANCER_PORT", 9000);
-            bool useLbRouting = EnvLoader.Get("USE_LOAD_BALANCER_ROUTING", "1") != "0";
+            int directTcpPort = EnvLoader.GetInt("SERVER_TCP_PORT", 8888);
+            int directUdpPort = EnvLoader.GetInt("SERVER_UDP_PORT", 8889);
+            string lbMode = EnvLoader.Get("LOAD_BALANCER_CLIENT_MODE", "relay").Trim().ToLowerInvariant();
+            bool useLoadBalancer = EnvLoader.Get("USE_LOAD_BALANCER_ROUTING", "1") != "0";
 
             bool connected = false;
-            if (useLbRouting)
+            _network.PreferTcpRealtime = false;
+
+            if (useLoadBalancer && lbMode == "direct")
             {
                 try
                 {
@@ -159,9 +163,21 @@ namespace DrawingClient.Forms
                     connected = false;
                 }
             }
+            else if (useLoadBalancer)
+            {
+                _network.SetAssignedServer(serverIp, lbPort, 0);
+                _network.PreferTcpRealtime = true;
+                connected = _network.Connect(serverIp, lbPort, true);
+                if (connected)
+                    lblStatus.Text = $"Da ket noi LB relay {serverIp}:{lbPort}";
+            }
 
             if (!connected)
+            {
+                _network.PreferTcpRealtime = false;
+                _network.SetAssignedServer(serverIp, directTcpPort, directUdpPort);
                 connected = _network.Connect(serverIp, directTcpPort, true);
+            }
 
             if (!connected)
             {
@@ -183,6 +199,9 @@ namespace DrawingClient.Forms
             if (response != null && response.IsSuccess)
             {
                 lblStatus.Text = "Đăng nhập thành công.";
+                NetworkEvents.OnLoginResponse -= NetworkEvents_OnLoginResponse;
+                NetworkEvents.OnRegisterResponse -= NetworkEvents_OnRegisterResponse;
+                NetworkEvents.OnDisconnected -= NetworkEvents_OnDisconnected;
                 LobbyForm lobby = new LobbyForm(_network, response.Username ?? txtUsername.Text.Trim());
                 this.Hide();
                 lobby.FormClosed += (s, e) => this.Close();
