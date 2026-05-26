@@ -76,9 +76,13 @@ namespace DrawingClient.Network
                 _running = true;
                 _lastHeartbeatReceived = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
+                // XU LY DA LUONG: tach thread nhan packet TCP de khong chan thread UI/gui lenh.
+                // Thread nay chi doc stream va day packet vao NetworkEvents; UI se duoc marshal bang BeginInvoke o cac form.
                 _receiveThread = new Thread(ReceiveLoop) { IsBackground = true, Name = "TCP-Recv" };
                 _receiveThread.Start();
 
+                // XU LY DA LUONG: heartbeat chay tren thread rieng de phat hien mat ket noi dinh ky.
+                // Neu gop vao receive loop, khi server im lang client se kho phat hien timeout dung han.
                 _heartbeatThread = new Thread(HeartbeatLoop) { IsBackground = true, Name = "TCP-Heartbeat" };
                 _heartbeatThread.Start();
 
@@ -122,9 +126,11 @@ namespace DrawingClient.Network
                 _running = true;
                 _lastHeartbeatReceived = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
+                // XU LY DA LUONG: relay mode van dung thread rieng de doc packet tu stream TLS.
                 _receiveThread = new Thread(ReceiveLoop) { IsBackground = true, Name = "TCP-Recv" };
                 _receiveThread.Start();
 
+                // XU LY DA LUONG: heartbeat doc lap voi receive loop, tranh treo khi server khong phan hoi.
                 _heartbeatThread = new Thread(HeartbeatLoop) { IsBackground = true, Name = "TCP-Heartbeat" };
                 _heartbeatThread.Start();
 
@@ -142,6 +148,8 @@ namespace DrawingClient.Network
 
         private static void ConnectTcpWithTimeout(TcpClient tcp, string host, int port, int timeoutMs)
         {
+            // XU LY BAT DONG BO: dung ConnectAsync ket hop Wait(timeout) de gioi han thoi gian ket noi.
+            // Ham Connect() duoc LoginForm goi ben trong Task.Run, nen doan Wait nay khong lam dong bang UI.
             Task connectTask = tcp.ConnectAsync(host, port);
             if (!connectTask.Wait(timeoutMs) || !tcp.Connected)
                 throw new TimeoutException($"Timeout connecting to {host}:{port}.");
@@ -152,6 +160,8 @@ namespace DrawingClient.Network
 
         private static void AuthenticateSslWithTimeout(SslStream ssl, int timeoutMs)
         {
+            // MA HOA/TLS + BAT DONG BO: bat tay TLS 1.2 voi server va co timeout de tranh treo vo han.
+            // Sau khi thanh cong, _stream tro thanh SslStream nen toan bo packet TCP duoc ma hoa TLS.
             Task authTask = ssl.AuthenticateAsClientAsync("DrawingServer", null, SslProtocols.Tls12, false);
             if (!authTask.Wait(timeoutMs) || !ssl.IsAuthenticated)
                 throw new TimeoutException("Timeout during TLS handshake.");
@@ -180,6 +190,7 @@ namespace DrawingClient.Network
             ServerRouteInfo route;
             try
             {
+                // XU LY BAT DONG BO: hoi LB de lay owner server cua room truoc khi join phong.
                 route = await LoadBalancerRouteClient.ResolveAsync(lbHost, lbPort, 2500, roomCode);
             }
             catch (Exception ex)
@@ -229,6 +240,7 @@ namespace DrawingClient.Network
 
         private void HeartbeatLoop()
         {
+            // XU LY DA LUONG: vong lap nay chay tren TCP-Heartbeat thread nen khong chan receive loop.
             while (_running)
             {
                 try
@@ -281,6 +293,7 @@ namespace DrawingClient.Network
                 byte[] data = packet.Serialize();
                 byte[] lenBytes = BitConverter.GetBytes(data.Length);
                 if (BitConverter.IsLittleEndian) Array.Reverse(lenBytes);
+                // XU LY DA LUONG: khoa stream de nhieu thread khong ghi xen ke lam vo packet.
                 lock (_stream)
                 {
                     if (_stream == null || !_running) return;
@@ -334,6 +347,8 @@ namespace DrawingClient.Network
 
         private void ReceiveLoop()
         {
+            // XU LY DA LUONG: ReceiveLoop chay tren TCP-Recv thread, doc packet length-prefix lien tuc tu server.
+            // Khi nhan xong packet, no goi ProcessPacket de phat event sang UI/network layer.
             byte[] lenBuf = new byte[4];
             while (_running)
             {

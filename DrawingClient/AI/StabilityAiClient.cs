@@ -12,6 +12,7 @@ namespace DrawingClient.AI
 {
     public static class StabilityAiClient
     {
+        // XU LY DA LUONG: gioi han toi da 2 request AI dong thoi de tranh qua tai API/UI.
         private static readonly SemaphoreSlim RequestGate = new SemaphoreSlim(2, 2);
 
         public static async Task<byte[]> GenerateImageAsync(string prompt, CancellationToken cancellationToken = default)
@@ -28,6 +29,7 @@ namespace DrawingClient.AI
             };
 
             string json = JsonConvert.SerializeObject(body);
+            // XU LY BAT DONG BO: cho slot request bang SemaphoreSlim async, khong block thread UI.
             await RequestGate.WaitAsync(cancellationToken);
             try
             {
@@ -38,6 +40,7 @@ namespace DrawingClient.AI
                 };
                 request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + ApiConfig.HuggingFaceToken);
 
+                // KET NOI DU LIEU/NETWORK: goi HTTP API Hugging Face bang SendAsync.
                 using var response = await client.SendAsync(request, cancellationToken);
                 byte[] responseBytes = await response.Content.ReadAsByteArrayAsync();
                 string contentType = response.Content.Headers.ContentType?.MediaType ?? "";

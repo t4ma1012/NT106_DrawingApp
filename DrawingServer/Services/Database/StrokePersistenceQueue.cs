@@ -19,6 +19,7 @@ namespace DrawingServer.Database
             public string Username = "";
         }
 
+        // XU LY DA LUONG: BlockingCollection lam hang doi an toan giua thread realtime va worker luu DB.
         private static readonly BlockingCollection<StrokeRecord> Queue = new BlockingCollection<StrokeRecord>();
         private static readonly Dictionary<string, List<StrokeRecord>> PendingByRoom = new Dictionary<string, List<StrokeRecord>>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, int> RoomVersions = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -35,6 +36,7 @@ namespace DrawingServer.Database
 
             var record = new StrokeRecord
             {
+                // XU LY DA LUONG: Interlocked tao so thu tu thread-safe cho stroke moi.
                 Sequence = Interlocked.Increment(ref _nextSequence),
                 RoomCode = roomCode,
                 ActionId = string.IsNullOrWhiteSpace(actionId) ? Guid.NewGuid().ToString() : actionId,
@@ -42,6 +44,7 @@ namespace DrawingServer.Database
                 Username = username ?? ""
             };
 
+            // XU LY DA LUONG: khoa pending theo room de nhieu packet ve khong sua list cung luc.
             lock (PendingLock)
             {
                 if (!RoomVersions.TryGetValue(roomCode, out int version))
@@ -56,6 +59,7 @@ namespace DrawingServer.Database
                 list.Add(record);
             }
 
+            // XU LY BAT DONG BO: dua stroke vao queue, worker nen se luu DB sau.
             Queue.Add(record);
         }
 
@@ -95,6 +99,7 @@ namespace DrawingServer.Database
             if (Interlocked.Exchange(ref _workerStarted, 1) == 1)
                 return;
 
+            // XU LY DA LUONG: khoi dong worker nen mot lan duy nhat de xu ly hang doi DB.
             Task.Run(ProcessQueueAsync);
         }
 
@@ -108,6 +113,7 @@ namespace DrawingServer.Database
                 int delayMs = 250;
                 while (!IsStale(record))
                 {
+                    // KET NOI DU LIEU/BAT DONG BO: worker goi DB async, retry neu database tam thoi loi/qua tai.
                     bool saved = await DbManager.SaveStrokeRecordAsync(record.RoomCode, record.ActionId, record.StrokeJson, record.Username);
                     if (saved)
                     {

@@ -63,6 +63,7 @@ namespace DrawingClient.Forms
 
             if (IsHandleCreated && InvokeRequired)
             {
+                // XU LY DA LUONG: response gallery den tu network thread, marshal ve UI thread truoc khi tao controls.
                 BeginInvoke(new Action(() => NetworkEvents_OnGalleryReceived(payload)));
                 return;
             }
@@ -136,6 +137,7 @@ namespace DrawingClient.Forms
 
             try
             {
+                // I/O DU LIEU -> IMAGE: thumbnail tu server dang la base64, decode thanh bytes roi doc bang MemoryStream.
                 byte[] bytes = Convert.FromBase64String(base64);
                 using (var ms = new MemoryStream(bytes))
                     return Image.FromStream(ms);
@@ -148,6 +150,7 @@ namespace DrawingClient.Forms
 
         private void SaveGalleryImage(GalleryItem item)
         {
+            // I/O FILE XUAT RA MAY: nguoi dung chon vi tri luu anh gallery ve o dia.
             using (var dialog = new SaveFileDialog())
             {
                 dialog.Filter = "PNG Image|*.png";
@@ -157,6 +160,7 @@ namespace DrawingClient.Forms
 
                 try
                 {
+                    // I/O DU LIEU -> FILE: anh gallery dang la base64 trong payload, decode ve bytes va ghi ra file local.
                     byte[] bytes = Convert.FromBase64String(item.ThumbnailData ?? "");
                     File.WriteAllBytes(dialog.FileName, bytes);
                     lblStatus.Text = "Đã lưu ảnh.";

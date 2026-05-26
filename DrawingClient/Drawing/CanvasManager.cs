@@ -410,6 +410,7 @@ namespace DrawingClient.Drawing
                 if (string.IsNullOrWhiteSpace(payload.ImageData))
                     return;
 
+                // I/O DU LIEU -> IMAGE: packet import image mang base64, decode thanh bytes roi tao Bitmap de render.
                 byte[] bytes = Convert.FromBase64String(payload.ImageData);
                 using (var ms = new MemoryStream(bytes))
                 using (var img = new Bitmap(Image.FromStream(ms)))
@@ -635,6 +636,7 @@ namespace DrawingClient.Drawing
             string effectiveActionId = string.IsNullOrWhiteSpace(actionId) ? Guid.NewGuid().ToString() : actionId;
             string imageData;
 
+            // I/O DU LIEU -> NETWORK/DB: anh import trong RAM duoc ma hoa thanh PNG base64 de sync/replay.
             using (var ms = new MemoryStream())
             {
                 image.Save(ms, ImageFormat.Png);
@@ -659,12 +661,14 @@ namespace DrawingClient.Drawing
         {
             if (string.IsNullOrWhiteSpace(filePath) || drawingSurface == null) return;
 
+            // I/O DU LIEU -> FILE: render toan bo canvas/object layer thanh Bitmap roi ghi ra file local.
             using (Bitmap exportBmp = RenderToBitmap())
                 exportBmp.Save(filePath);
         }
 
         public string ExportPngBase64(int maxWidth = 0, int maxHeight = 0)
         {
+            // I/O DU LIEU -> NETWORK/DB: render canvas thanh PNG trong MemoryStream roi base64 hoa de gui/luu gallery.
             using (Bitmap exportBmp = RenderToBitmap())
             using (Bitmap output = ResizeForExport(exportBmp, maxWidth, maxHeight))
             using (MemoryStream ms = new MemoryStream())
@@ -1729,6 +1733,7 @@ namespace DrawingClient.Drawing
 
             try
             {
+                // I/O DU LIEU -> IMAGE: background replay tu DrawHistory dang la base64, decode ve Bitmap local.
                 byte[] bytes = Convert.FromBase64String(imageData);
                 using (var ms = new MemoryStream(bytes))
                 using (var img = Image.FromStream(ms))

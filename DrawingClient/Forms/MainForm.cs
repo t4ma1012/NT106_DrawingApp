@@ -365,6 +365,8 @@ namespace DrawingClient.Forms
             canvas.MouseUp += Canvas_MouseUp_Custom;
             canvas.Paint += Canvas_Paint_Custom;
 
+            // XU LY DA LUONG/BAT DONG BO: System.Threading.Timer chay tren ThreadPool.
+            // Timer chi gui trang thai cursor moi nhat theo chu ky, tranh gui qua nhieu packet khi MouseMove lien tuc.
             realtimePointerTimer = new System.Threading.Timer(_ => FlushRealtimePointerState(), null, 0, RealtimePointerFlushIntervalMs);
             remoteCursorRenderTimer = new System.Windows.Forms.Timer { Interval = RemoteCursorRenderIntervalMs };
             remoteCursorRenderTimer.Tick += (s, e) => FlushRemoteCursorState();
@@ -1333,14 +1335,17 @@ namespace DrawingClient.Forms
         {
             if (!EnsureCanDraw()) return;
 
+            // I/O FILE NHAP TU MAY: mo hop thoai cho nguoi dung chon file anh nen tren o dia.
             using (OpenFileDialog openFileDialog = new OpenFileDialog())
             {
                 openFileDialog.Filter = "Image files|*.png;*.jpg;*.jpeg;*.bmp";
                 if (openFileDialog.ShowDialog() != DialogResult.OK)
                     return;
 
+                // I/O FILE -> DU LIEU: Image.FromFile nap anh tu duong dan local vao bo nho.
                 using (Image image = Image.FromFile(openFileDialog.FileName))
                 {
+                    // I/O DU LIEU -> NETWORK/DB: nen/rescale anh nen roi encode base64 de gui qua packet SET_BACKGROUND.
                     string imageData = EncodeBackgroundImageForNetwork(image);
                     canvasManager.ChangeBackgroundImage(image);
 
@@ -1366,6 +1371,7 @@ namespace DrawingClient.Forms
         {
             if (!EnsureCanDraw()) return;
 
+            // I/O FILE NHAP TU MAY: nguoi dung chon anh local de import vao canvas.
             using (OpenFileDialog openFileDialog = new OpenFileDialog())
             {
                 openFileDialog.Filter = "Image files|*.png;*.jpg;*.jpeg;*.bmp";
@@ -1375,6 +1381,7 @@ namespace DrawingClient.Forms
                 if (pendingImportImage != null)
                     pendingImportImage.Dispose();
 
+                // I/O FILE -> DU LIEU: doc file anh thanh Image trong RAM; chua gui network cho den khi user keo dat kich thuoc.
                 pendingImportImage = Image.FromFile(openFileDialog.FileName);
                 pendingImportAiType = null;
                 pendingImportPrompt = null;
@@ -1386,6 +1393,7 @@ namespace DrawingClient.Forms
 
         private void BtnExport_Click(object sender, EventArgs e)
         {
+            // I/O FILE XUAT RA MAY: SaveFileDialog lay duong dan dich de ghi PNG/JPEG ra o dia.
             using (SaveFileDialog saveFileDialog = new SaveFileDialog())
             {
                 saveFileDialog.Filter = "PNG Image|*.png|JPEG Image|*.jpg";
@@ -1393,6 +1401,7 @@ namespace DrawingClient.Forms
                 if (saveFileDialog.ShowDialog() != DialogResult.OK)
                     return;
 
+                // I/O DU LIEU -> FILE: CanvasManager render bitmap hien tai va Save vao file local.
                 canvasManager.ExportImage(saveFileDialog.FileName);
                 ToastForm.ShowToast(this, "Đã xuất ảnh.");
             }
@@ -1411,6 +1420,7 @@ namespace DrawingClient.Forms
             if (string.IsNullOrWhiteSpace(prompt))
                 return;
 
+            // XU LY BAT DONG BO: chay request AI bang async de UI khong bi khoa trong luc cho HTTP API.
             await RunButtonTaskAsync(sender as Button, "AI đang tạo ảnh...", async () =>
             {
                 byte[] imageBytes = await StabilityAiClient.GenerateImageAsync(prompt.Trim());
@@ -1448,7 +1458,9 @@ namespace DrawingClient.Forms
                 if (openFileDialog.ShowDialog() != DialogResult.OK)
                     return;
 
+                // I/O FILE -> DU LIEU: doc raw bytes tu file local de gui len Remove.bg.
                 byte[] inputBytes = File.ReadAllBytes(openFileDialog.FileName);
+                // XU LY BAT DONG BO: goi Remove.bg trong async task, sau do convert bytes tra ve thanh Image.
                 await RunButtonTaskAsync(sender as Button, "AI đang xóa nền...", async () =>
                 {
                     byte[] resultBytes = await RemoveBgClient.RemoveBackgroundAsync(inputBytes);
@@ -1471,6 +1483,7 @@ namespace DrawingClient.Forms
             if (selectedImage == null || string.IsNullOrWhiteSpace(selectedImage.ImageData))
                 return;
 
+            // I/O DU LIEU -> BYTES: anh dang chon da nam tren canvas dang base64, decode ve bytes de gui Remove.bg.
             byte[] inputBytes = Convert.FromBase64String(selectedImage.ImageData);
             await RunButtonTaskAsync(button, "AI đang xóa nền...", async () =>
             {
@@ -1499,6 +1512,7 @@ namespace DrawingClient.Forms
                     button.Text = busyText;
                 }
                 Cursor = Cursors.WaitCursor;
+                // XU LY BAT DONG BO: await action() nhuong UI thread trong luc tac vu network/AI dang chay.
                 await action();
             }
             catch (Exception ex)
@@ -1559,9 +1573,11 @@ namespace DrawingClient.Forms
 
         private Image CreateImageFromBytes(byte[] bytes)
         {
+            // I/O DU LIEU -> IMAGE: MemoryStream boc mang byte thanh stream de Image.FromStream doc duoc.
             using (MemoryStream ms = new MemoryStream(bytes))
             using (Image image = Image.FromStream(ms))
             {
+                // Tao Bitmap moi de tach khoi MemoryStream, tranh anh bi loi sau khi stream dispose.
                 return new Bitmap(image);
             }
         }
@@ -1586,6 +1602,7 @@ namespace DrawingClient.Forms
             long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             canvasManager.ImportImage(image, target, actionId, _network?.CurrentUsername, timestamp);
 
+            // I/O DU LIEU -> NETWORK/DB: chuyen Image trong RAM thanh PNG bytes roi base64 de gui packet.
             using (MemoryStream ms = new MemoryStream())
             {
                 image.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
@@ -1660,6 +1677,8 @@ namespace DrawingClient.Forms
             using (Graphics g = Graphics.FromImage(bitmap))
             using (MemoryStream ms = new MemoryStream())
             {
+                // I/O DU LIEU -> NETWORK/DB: ve anh nen vao bitmap dung kich thuoc canvas,
+                // nen JPEG vao MemoryStream, roi base64 hoa de luu/replay qua DrawHistory.
                 g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
                 g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
                 g.Clear(canvasManager.BackgroundColor);
@@ -2550,6 +2569,7 @@ namespace DrawingClient.Forms
         {
             if (this.IsHandleCreated && this.InvokeRequired)
             {
+                // XU LY DA LUONG: packet den tu network thread, nen phai marshal ve UI thread truoc khi cham control WinForms.
                 this.BeginInvoke(action);
                 return;
             }

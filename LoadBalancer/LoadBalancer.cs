@@ -65,6 +65,8 @@ namespace LoadBalancer
 
         public async Task StartAsync(int listenPort, int udpPort)
         {
+            // XU LY DA LUONG: HealthCheckLoop va StartUdpProxyAsync duoc dua len ThreadPool bang Task.Run.
+            // Trong khi 2 task nen nay dang chay, task StartAsync van tiep tuc lang nghe TCP client moi.
             _ = Task.Run(HealthCheckLoop);
             _ = Task.Run(() => StartUdpProxyAsync(udpPort));
 
@@ -74,7 +76,10 @@ namespace LoadBalancer
 
             while (true)
             {
+                // XU LY BAT DONG BO: AcceptTcpClientAsync khong chiem thread trong luc chua co client moi.
                 TcpClient client = await _listener.AcceptTcpClientAsync();
+                // XU LY DA LUONG: moi ket noi proxy duoc xu ly tren task rieng.
+                // Nho vay client A dang proxy/route khong lam client B phai doi.
                 _ = Task.Run(() => HandleClientAsync(client));
             }
         }
@@ -88,7 +93,10 @@ namespace LoadBalancer
             {
                 try
                 {
+                    // XU LY BAT DONG BO: ReceiveAsync cho UDP datagram khong chan cac tac vu TCP cua LoadBalancer.
                     UdpReceiveResult result = await _udpListener.ReceiveAsync();
+                    // XU LY DA LUONG: moi datagram UDP proxy duoc xu ly song song tren ThreadPool.
+                    // Dieu nay giup cursor/ping realtime khong bi xep hang sau cac datagram truoc do.
                     _ = Task.Run(() => HandleUdpFromClientAsync(result));
                 }
                 catch (Exception ex)
@@ -103,6 +111,8 @@ namespace LoadBalancer
             string key = result.RemoteEndPoint.ToString();
             UdpProxySession session;
 
+            // XU LY DA LUONG: bao ve bang session UDP vi nhieu datagram co the den dong thoi.
+            // _udpSessions la Dictionary thuong, nen moi thao tac doc/ghi phai nam trong lock chung.
             lock (_lock)
             {
                 _udpSessions.TryGetValue(key, out session);
@@ -116,6 +126,8 @@ namespace LoadBalancer
                     return;
 
                 session = new UdpProxySession(result.RemoteEndPoint, target, this);
+                // XU LY DA LUONG: lock lan 2 de dang ky session moi mot cach atomic,
+                // tranh 2 packet dau tien cua cung client tao 2 UdpProxySession khac nhau.
                 lock (_lock)
                 {
                     _udpSessions[key] = session;
@@ -149,6 +161,7 @@ namespace LoadBalancer
         {
             try
             {
+                // MA HOA: giai ma AES de doc ServerId trong UDP_PING/packet.
                 byte[] decrypted = AesHelper.Decrypt(encryptedPacket);
                 Packet packet = Packet.Deserialize(decrypted);
                 if (packet.Payload == null || packet.Payload.Length == 0)
@@ -174,6 +187,8 @@ namespace LoadBalancer
             int read = 0;
             try
             {
+                // XU LY BAT DONG BO: doc preface ROUTE/RELAY tu client ma khong khoa LB.
+                // Sau khi doc xong, LB moi quyet dinh day la request ROUTE hay phien proxy TLS.
                 read = await clientStream.ReadAsync(probe, 0, probe.Length);
                 if (read <= 0)
                 {
@@ -192,6 +207,7 @@ namespace LoadBalancer
             {
                 string routeLine = await ReadAsciiLineAsync(clientStream, probeText, 256);
                 string roomCode = ExtractRouteRoomCode(routeLine);
+                // KET NOI DU LIEU/BAT DONG BO: route room co the doc owner_server_id tu database.
                 ServerInfo routeTarget = await SelectServerForRouteAsync(roomCode);
                 if (routeTarget == null)
                 {
@@ -200,6 +216,7 @@ namespace LoadBalancer
                     return;
                 }
 
+                // XU LY DA LUONG: RoutedClients duoc nhieu task client cap nhat nen phai lock.
                 lock (_lock)
                 {
                     routeTarget.RoutedClients++;
@@ -229,8 +246,10 @@ namespace LoadBalancer
             {
                 using var serverConn = new TcpClient();
                 serverConn.NoDelay = true;
+                // XU LY BAT DONG BO: mo ket noi den backend server bang ConnectAsync.
                 await serverConn.ConnectAsync(target.Host, target.TcpPort);
 
+                // XU LY DA LUONG: ActiveProxyConnections la bien dem dung chung cho chon server theo tai.
                 lock (_lock)
                 {
                     target.ActiveProxyConnections++;
@@ -245,6 +264,8 @@ namespace LoadBalancer
 
                 Console.WriteLine($"[LB] PROXY {clientIp} -> {target.Name} ({target.ActiveProxyConnections} active)");
 
+                // XU LY BAT DONG BO: proxy 2 chieu client<->server bang 2 task doc/ghi stream.
+                // t1 doc client->server, t2 doc server->client; Task.WhenAny dong phien khi mot huong ngat.
                 var t1 = ForwardAsync(clientStream, serverStream);
                 var t2 = ForwardAsync(serverStream, clientStream);
                 await Task.WhenAny(t1, t2);
@@ -371,6 +392,7 @@ namespace LoadBalancer
 
             try
             {
+                // KET NOI DU LIEU: LB ket noi PostgreSQL de doc owner server cua room.
                 using var conn = new NpgsqlConnection(PostgresConnectionString.Normalize(DatabaseUrl));
                 await conn.OpenAsync();
 
@@ -399,6 +421,7 @@ namespace LoadBalancer
 
             try
             {
+                // KET NOI DU LIEU: room legacy chua co owner se duoc cap nhat owner_server_id trong DB.
                 using var conn = new NpgsqlConnection(PostgresConnectionString.Normalize(DatabaseUrl));
                 await conn.OpenAsync();
 
@@ -569,6 +592,7 @@ namespace LoadBalancer
                 int read;
                 try
                 {
+                    // XU LY BAT DONG BO: doc stream theo chunk, task se nhuong thread khi chua co du lieu.
                     read = await from.ReadAsync(buf, 0, buf.Length);
                 }
                 catch
@@ -581,6 +605,7 @@ namespace LoadBalancer
 
                 try
                 {
+                    // XU LY BAT DONG BO: ghi chunk sang dau con lai cua proxy ma khong khoa LB.
                     await to.WriteAsync(buf, 0, read);
                     await to.FlushAsync();
                 }
@@ -595,6 +620,7 @@ namespace LoadBalancer
         {
             while (true)
             {
+                // XU LY BAT DONG BO: health check chay dinh ky tren background task cua LB.
                 await Task.Delay(5000);
 
                 List<ServerInfo> snapshot;
@@ -630,11 +656,13 @@ namespace LoadBalancer
             try
             {
                 using var tcp = new TcpClient();
+                // XU LY BAT DONG BO: ping backend bang TCP connect co timeout.
                 var connectTask = tcp.ConnectAsync(host, port);
                 if (await Task.WhenAny(connectTask, Task.Delay(1500)) != connectTask || !tcp.Connected)
                     return false;
 
                 using var ssl = new SslStream(tcp.GetStream(), false, (sender, cert, chain, errors) => true);
+                // MA HOA/TLS: LB verify backend bang TLS handshake, khong chi ping port tho.
                 var authTask = ssl.AuthenticateAsClientAsync("DrawingServer", null, SslProtocols.Tls12, false);
                 return await Task.WhenAny(authTask, Task.Delay(1500)) == authTask && ssl.IsAuthenticated;
             }

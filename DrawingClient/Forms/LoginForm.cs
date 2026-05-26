@@ -178,6 +178,7 @@ namespace DrawingClient.Forms
             {
                 try
                 {
+                    // XU LY BAT DONG BO: hoi LoadBalancer va ket noi server tren task nen de UI login khong bi treo.
                     var route = await LoadBalancerRouteClient.ResolveAsync(serverIp, lbPort);
                     _network.SetAssignedServer(route.Host, route.TcpPort, route.UdpPort);
                     connected = await Task.Run(() => _network.Connect(route.Host, route.TcpPort, true));
@@ -194,6 +195,7 @@ namespace DrawingClient.Forms
                 string serverId = "";
                 try
                 {
+                    // XU LY BAT DONG BO: resolve server id cua LB truoc khi relay TLS den backend.
                     var route = await LoadBalancerRouteClient.ResolveAsync(serverIp, lbPort);
                     serverId = route.ServerId ?? "";
                 }
@@ -204,6 +206,7 @@ namespace DrawingClient.Forms
 
                 _network.SetAssignedServer(serverIp, lbPort, lbUdpPort, serverId);
                 _network.PreferTcpRealtime = !useLbUdpProxy;
+                // XU LY BAT DONG BO: ConnectRelay co the mat thoi gian handshake TCP/TLS, nen chay ngoai UI thread.
                 connected = await Task.Run(() => _network.ConnectRelay(serverIp, lbPort, serverId));
                 if (connected)
                     lblStatus.Text = useLbUdpProxy
@@ -215,6 +218,7 @@ namespace DrawingClient.Forms
             {
                 _network.PreferTcpRealtime = forceTcpRealtime;
                 _network.SetAssignedServer(serverIp, directTcpPort, directUdpPort);
+                // XU LY BAT DONG BO: fallback direct cung duoc dua vao Task.Run de form van phan hoi.
                 connected = await Task.Run(() => _network.Connect(serverIp, directTcpPort, true));
             }
 

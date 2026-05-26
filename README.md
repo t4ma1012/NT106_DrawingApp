@@ -1,107 +1,388 @@
-# Collaborative Drawing App
+# NT106 Drawing App
 
-## Quick Config (Latest)
+Ung dung ve cong tac thoi gian thuc bang C# WinForms, ho tro nhieu nguoi cung ve, chat, luu gallery va su dung AI image trong cung mot phong. Du an duoc xay theo mo hinh Client - Server, co Load Balancer cho demo nhieu server va PostgreSQL de luu tai khoan, phong, lich su ve va du lieu cong tac.
 
-1. Copy `.env.example` to `.env` at repo root.
-2. Fill `DATABASE_URL`, `GEMINI_API_KEY`, `REMOVE_BG_API_KEY`.
-3. Optional routing:
-   - `USE_LOAD_BALANCER_ROUTING=1`
-   - configure `LOAD_BALANCER_HOST`, `LOAD_BALANCER_PORT`
-4. Room limit default is controlled by `MAX_ROOM_MEMBERS` (current target: `5`).
-5. For 2-server demo, use `LoadBalancer/servers.example.json` as template for `servers.json`.
+## 1. Kien truc tong quan
 
-## Current AI Scope
+Du an gom 4 project chinh:
 
-- Enabled: text-to-image (Gemini), remove background (Remove.bg).
-- Disabled by scope decision: magic erase.
+| Project | Vai tro |
+| --- | --- |
+| `DrawingClient` | Ung dung WinForms cho nguoi dung: dang nhap/dang ky, tao/join phong, ve canvas, chat, gallery, AI image, sticker, text, sticky note. |
+| `DrawingServer` | Server TCP/TLS + UDP/AES: xu ly packet, quan ly room, broadcast realtime, luu PostgreSQL. |
+| `LoadBalancer` | Ingress/proxy cho nhieu DrawingServer: route client, health check server, room-affinity, relay TCP va UDP proxy local/LAN. |
+| `SharedLib` | Thu vien dung chung: packet protocol, payload DTO, AES helper, env loader, logger, API config. |
 
-Đây là ứng dụng Vẽ Trực Tuyến Thời Gian Thực hỗ trợ nhiều người cùng kết nối, vẽ và trò chuyện trong một phòng chung. 
+Topology demo khuyen nghi:
 
-Dự án được xây dựng theo mô hình Client - Server bằng C# (.NET) và sử dụng cơ sở dữ liệu PostgreSQL.
-
-## 🌟 Danh sách tính năng
-
-### 1. Hệ thống Tài khoản & Phòng
-- **Tự động Đăng ký/Đăng nhập**: Chỉ cần nhập Username và Password, hệ thống sẽ tự động đăng ký nếu tài khoản chưa tồn tại, hoặc đăng nhập nếu đã có.
-- **Bảo mật mật khẩu**: Mật khẩu được băm bằng chuẩn **SHA-256** trước khi lưu vào Database.
-- **Tạo và Tham gia phòng**: Người dùng có thể tạo phòng mới (nhận một mã phòng ngẫu nhiên) hoặc tham gia vào phòng có sẵn thông qua mã phòng.
-- **Nhật ký hoạt động**: Thông báo thời gian thực khi có người mới tham gia hoặc rời khỏi phòng.
-
-### 2. Công cụ Vẽ (Canvas)
-- **Đồng bộ thời gian thực**: Nét vẽ của bạn sẽ ngay lập tức hiển thị trên màn hình của tất cả những người khác trong phòng.
-- **Tuỳ chỉnh Bút vẽ**:
-  - Chọn màu bút với tính năng hiển thị mã màu khi rọi chuột.
-  - Điều chỉnh độ dày nét vẽ với nhãn hiển thị kích thước trực quan.
-- **Cục tẩy**: Xoá các nét vẽ lỗi.
-- **Hoàn tác & Làm lại (Undo / Redo)**: 
-  - Hỗ trợ nút bấm trên giao diện.
-  - Hỗ trợ phím tắt tiện lợi: `Ctrl + Z` (Hoàn tác) và `Ctrl + Y` (Làm lại). (Cái này chưa fix được)
-- **Công cụ Hút màu**: Rọi chuột vào một điểm bất kỳ trên khung vẽ để lấy màu nền tại điểm đó. (Cái này chưa fix được)
-- **Đồng bộ màu nền**: Đổi màu nền của toàn bộ khung vẽ và đồng bộ cho tất cả mọi người trong phòng.
-- **Xoá toàn bộ bảng**: Làm sạch khung vẽ với 1 nút bấm.
-
-### 3. Tương tác & Trò chuyện
-- **Chat thời gian thực**: Nhắn tin với mọi người trong phòng (tự động ẩn/hiện khung chat).
-
-### 4. Nền tảng Mạng (Networking)
-- **Giao thức bảo mật TCP (TLS/SSL)**: Toàn bộ quá trình đăng nhập và điều khiển phòng được mã hoá an toàn.
-- **Giao thức UDP**: Truyền tải nét vẽ tốc độ cao, độ trễ thấp giúp trải nghiệm vẽ mượt mà.
-
----
-
-## 🛠 Hướng dẫn Cài đặt & Setup chi tiết (Cho máy tính mới tinh)
-
-### Bước 1: Cài đặt .NET SDK (Môi trường chạy C#)
-Ứng dụng cần .NET SDK để có thể biên dịch và chạy mã C#.
-1. Truy cập trang tải chính thức của Microsoft: [Tải .NET 8.0 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/8.0).
-2. Bấm vào nút tải **Windows x64 Installer**.
-3. Mở file cài đặt vừa tải về, cứ bấm **Next** và **Install** cho đến khi hoàn tất.
-
-*Nếu bạn dùng Windows 10/11, bạn cũng có thể cài nhanh bằng cách mở PowerShell và dán lệnh sau:*
-```powershell
-winget install Microsoft.DotNet.SDK.8
+```text
+Client(s) -> ngrok TCP/LAN -> LoadBalancer -> DrawingServer-1/2 -> PostgreSQL
 ```
 
-### Bước 2: Cài đặt Hệ quản trị Cơ sở dữ liệu PostgreSQL
-Ứng dụng dùng PostgreSQL để lưu trữ tài khoản người dùng một cách an toàn.
-1. Truy cập trang tải chính thức: [Tải PostgreSQL cho Windows](https://www.postgresql.org/download/windows/).
-2. Tải bản **Installer** mới nhất và tiến hành cài đặt.
-3. Cứ bấm **Next**, nhưng **ĐẶC BIỆT LƯU Ý** ở bước nhập mật khẩu (Password), bạn BẮT BUỘC phải nhập mật khẩu là:
-   **`123456`** 
-   *(Đây là mật khẩu mà Server của ứng dụng đã được thiết lập để kết nối. Nếu bạn đặt mật khẩu khác, ứng dụng sẽ báo lỗi).*
-4. Ở các bước sau (Port, Locale...), cứ để mặc định (Port: `5432`) và bấm Next cho đến khi cài đặt xong.
+Voi demo 1 server don gian:
 
-### Bước 3: Tạo Database (Cơ sở dữ liệu)
-1. Bấm nút `Start` trên Windows, tìm kiếm ứng dụng có tên là **pgAdmin 4** (nó vừa được cài kèm với PostgreSQL ở bước trên) và mở nó lên.
-2. Nó sẽ yêu cầu bạn nhập mật khẩu. Hãy nhập `123456`.
-3. Ở cột bên trái, mở rộng mục **Servers** -> **PostgreSQL...** -> chuột phải vào mục **Databases** -> chọn **Create** -> **Database...**
-4. Ở ô **Database**, nhập chính xác chữ: **`drawingapp`** (viết thường, không dấu cách).
-5. Bấm **Save**.
-*(Bạn không cần tạo các bảng hay cột gì cả, khi chạy Server, code sẽ tự động tạo bảng (Auto-migration) giúp bạn).*
+```text
+Client(s) -> DrawingServer -> PostgreSQL
+```
 
-### Bước 4: Chạy Server (Bắt buộc phải chạy Server trước)
-Bây giờ mọi thứ đã sẵn sàng. Hãy mở thư mục chứa mã nguồn ứng dụng (ví dụ: `NT106_DrawingApp`).
-1. Nhấn chuột phải vào khoảng trống trong thư mục dự án gốc, chọn **Open in Terminal** (hoặc Open PowerShell).
-2. Di chuyển vào thư mục Server bằng lệnh:
-   ```bash
-   cd DrawingServer
-   ```
-3. Chạy Server bằng lệnh:
-   ```bash
-   dotnet run
-   ```
-4. Nếu Terminal in ra dòng chữ màu xanh lá `[SecureTcpServer] Bắt đầu lắng nghe...` nghĩa là máy chủ đã chạy thành công! **(Lưu ý: Bạn KHÔNG được tắt cửa sổ Terminal màu đen này đi, hãy thu nhỏ nó xuống).**
+## 2. Cau truc thu muc
 
-### Bước 5: Chạy Client (Giao diện ứng dụng)
-1. Mở lại thư mục chứa mã nguồn.
-2. Mở thêm **MỘT CỬA SỔ TERMINAL MỚI** (nhấn chuột phải chọn Open in Terminal).
-3. Di chuyển vào thư mục Client bằng lệnh:
-   ```bash
-   cd DrawingClient
-   ```
-4. Chạy Client bằng lệnh:
-   ```bash
-   dotnet run
-   ```
-5. Giao diện Đăng nhập sẽ hiện lên. Bạn có thể mở ứng dụng thành nhiều cửa sổ (bằng cách lặp lại Bước 5) để thử nghiệm nhiều người dùng cùng vẽ với nhau!
+```text
+NT106_DrawingApp/
++-- DrawingClient/                 # WinForms client
+|   +-- Forms/                       # Login, Lobby, Main canvas, Gallery
+|   +-- Drawing/                     # CanvasManager, tools, flood fill, text tool
+|   +-- Network/                     # TCP/TLS, UDP/AES, route client, event hub
+|   +-- AI/                          # Hugging Face image, Remove.bg
++-- DrawingServer/                 # Secure TCP/UDP server
+|   +-- Network/                     # SecureTcpServer, SecureUdpServer, ClientSession
+|   +-- Services/                    # Room/Auth/Draw/Cross-server/Heartbeat
+|   +-- Services/Database/           # DbManager, queue, migrations
++-- LoadBalancer/                  # TCP/UDP proxy, route, health check
++-- SharedLib/                     # Packet, payload, security, config, logger
++-- NT106Tests/                    # Unit/load/security tests
++-- setup/                         # Scripts va binary release cho demo
++-- local/                         # Tai lieu noi bo, plan, overview
++-- .env.example                   # Mau env root
++-- NT106_DrawingApp.sln           # Solution chinh
+```
 
+`setup/apps`, `bin`, `obj`, `local/tmp_build` la output build/runtime, khong phai source logic chinh.
+
+## 3. Tinh nang chinh
+
+### Tai khoan va phong
+
+- Dang nhap/dang ky qua TCP/TLS.
+- Password duoc bam SHA-256 truoc khi luu DB.
+- Tao phong bang ma phong 6 so.
+- Join phong co gioi han so thanh vien, mac dinh `MAX_ROOM_MEMBERS=5`.
+- Room owner duoc luu trong DB va gan voi `owner_server_id` de LoadBalancer route dung server.
+
+### Canvas va cong cu ve
+
+- Canvas GDI+ co dinh 1920x1080.
+- Pen, line, rectangle, circle, eraser, pipette, flood fill BFS.
+- Giu `Shift` khi ve rectangle/circle de tao hinh vuong/hinh tron.
+- Text tool luu toa do theo canvas, co the move/resize/delete.
+- Import image, sticker, sticky note, background mau/anh.
+- Zoom/pan local, moi user tu dieu chinh viewport rieng.
+- Undo/redo theo action cua chinh user.
+- Clear all xoa canvas va lich su phong.
+
+### Cong tac realtime
+
+- Draw/fill/text/import/sticker/background di TCP reliable de tranh mat net.
+- Cursor/pixel/realtime tam thoi co the di UDP/AES trong LAN/direct, hoac TCP fallback qua ngrok/LB.
+- Client join sau nhan `SYNC_BOARD` tu history DB va pending queue trong RAM.
+- History lon duoc chia chunk de tranh packet qua lon.
+
+### Chat va gallery
+
+- Chat realtime trong phong, luu `ChatHistory`.
+- Client join sau nhan lai cac tin gan nhat.
+- Save canvas vao Gallery trong DB.
+- Xuat anh local khong watermark.
+- Gallery co thumbnail/base64 va public token.
+
+### AI
+
+- Text-to-image qua Hugging Face Routing endpoint.
+- Remove background qua Remove.bg.
+- Ket qua AI duoc chen vao canvas, sync qua server, luu `AiResults` va replay nhu image action.
+
+### Ha tang demo
+
+- Direct local/LAN: client ket noi thang DrawingServer.
+- Local/LAN co LoadBalancer: client vao LB, LB chon backend.
+- Internet ngrok: public TCP vao LB hoac server direct.
+- Tailscale dung cho duong LoadBalancer -> server khi server khac mang.
+
+## 4. Cac file va ham quan trong
+
+### Client
+
+| File | Ham/class chinh | Chuc nang |
+| --- | --- | --- |
+| `DrawingClient/Forms/LoginForm.cs` | `EnsureConnectedAsync`, `BtnLogin_Click`, `NetworkEvents_OnLoginResponse`, `NetworkEvents_OnRegisterResponse` | Ket noi direct/LB, gui login/register, mo Lobby khi auth thanh cong. |
+| `DrawingClient/Forms/LobbyForm.cs` | UI create/join, `ReconnectToRoomOwnerViaLoadBalancerAsync`, one-shot join handler | Tao phong, join phong, route dung owner server truoc khi vao room. |
+| `DrawingClient/Forms/MainForm.cs` | Event handlers draw/chat/sync/gallery/AI, `RunButtonTaskAsync`, `UIInvoke` | Man hinh chinh, toolbar, canvas, chat, members, sync board, AI, gallery. |
+| `DrawingClient/Drawing/CanvasManager.cs` | Mouse handlers, render/replay action, object move/resize/delete, remote cursor | Xu ly toan bo canvas GDI+, tool ve va object layer. |
+| `DrawingClient/Network/ClientNetwork.cs` | `Connect`, `ConnectRelay`, `SendLogin`, `SendRegister`, `ReceiveLoop`, `ProcessPacket`, `HeartbeatLoop` | TCP/TLS client, packet framing, heartbeat, route/reconnect, event dispatch. |
+| `DrawingClient/Network/UdpManager.cs` | `Start`, `SendPacket`, `RegisterEndpoint`, `ListenLoop`, `ProcessPacket` | UDP/AES cho cursor va tin hieu tam thoi. |
+| `DrawingClient/Network/LoadBalancerRouteClient.cs` | `ResolveAsync` | Goi `ROUTE`/`ROUTE room=<code>` toi LB. |
+| `DrawingClient/AI/StabilityAiClient.cs` | `GenerateImageAsync` | Goi Hugging Face tao anh tu prompt. |
+| `DrawingClient/AI/RemoveBgClient.cs` | `RemoveBackgroundAsync` | Goi Remove.bg xoa nen anh. |
+
+### Server
+
+| File | Ham/class chinh | Chuc nang |
+| --- | --- | --- |
+| `DrawingServer/Program.cs` | `Main` | Load env, start TCP server, UDP server, heartbeat, cross-server sync. |
+| `DrawingServer/Network/SecureTcpServer.cs` | `StartAsync`, `HandleClientAsync`, `BroadcastToRoomAsync`, `SendHistoryToClientAsync`, `SaveStrokeFastPath`, `IsTurnBlocked` | Server TCP/TLS chinh, xu ly command login/room/chat/draw/gallery/AI/timeline. |
+| `DrawingServer/Network/SecureUdpServer.cs` | `StartAsync`, `HandlePacketAsync`, `BroadcastUdpAsync` | UDP/AES server cho cursor/pixel/realtime tam thoi. |
+| `DrawingServer/Network/ClientSession.cs` | `ClientSession`, `WriteLock` | Trang thai client tren server, khoa ghi SslStream tranh race. |
+| `DrawingServer/Services/RoomService.cs` | `CreateRoomAsync`, `TryAddMemberToRoomAsync`, `RemoveMemberFromRoom`, `TryAdvanceTurn`, `GetRoomMembersInfo` | Quan ly room state trong RAM. |
+| `DrawingServer/Services/Database/DbManager.cs` | `LoginAsync`, `CreateRoomAsync`, `SaveStrokeRecordAsync`, `GetRoomHistoryAsync`, `SaveChatMessageAsync`, `SaveGalleryItemAsync`, `SaveAiResultAsync`, `SaveActionStackAsync`, `SavePixelCellAsync` | Tat ca truy cap PostgreSQL. |
+| `DrawingServer/Services/Database/StrokePersistenceQueue.cs` | `Enqueue`, `GetPendingStrokeJson`, `ClearRoom`, `ProcessQueueAsync` | Queue luu DrawHistory nen co retry/backoff. |
+| `DrawingServer/Services/CrossServerSyncService.cs` | `Start`, `PublishEventAsync`, `ListenLoopAsync`, `OnNotification` | PostgreSQL LISTEN/NOTIFY fallback cross-server. |
+| `DrawingServer/Services/ServerNodeHeartbeatService.cs` | `Start`, `HeartbeatLoopAsync`, `SendHeartbeatAsync` | Cap nhat `ServerNodes` cho monitoring/backend health. |
+
+### SharedLib
+
+| File | Ham/class chinh | Chuc nang |
+| --- | --- | --- |
+| `SharedLib/Packets/PacketDef.cs` | `CommandType`, `Packet.Serialize`, `Packet.Deserialize` | Enum command va packet framing. |
+| `SharedLib/Packets/PacketHelper.cs` | `Create`, `CreateEmpty`, `GetPayload<T>`, `GetRawJson` | Tao/parse packet JSON. |
+| `SharedLib/Payloads/*.cs` | Payload DTO | Contract client-server cho auth, room, draw, chat, AI, gallery, sync. |
+| `SharedLib/Security/AesHelper.cs` | `Encrypt`, `Decrypt`, `TestRoundTrip` | Ma hoa/giai ma AES cho UDP. |
+| `SharedLib/Security/SecurityConfig.cs` | `AesKey`, `AesIV` | Key/IV AES dung chung. |
+| `SharedLib/Config/EnvLoader.cs` | `Load`, `Get`, `GetRequired`, `GetInt` | Doc `.env` va process env. |
+| `SharedLib/Config/PostgresConnectionString.cs` | `Normalize` | Chuan hoa connection string PostgreSQL cho Npgsql. |
+| `SharedLib/Logging/Logger.cs` | `Initialize`, `Info`, `Warning`, `Error`, `Exception`, `Debug` | Ghi log console/file. |
+
+### LoadBalancer
+
+| File | Ham/class chinh | Chuc nang |
+| --- | --- | --- |
+| `LoadBalancer/Program.cs` | `TryLoadServersFromJson`, `AddServersFromEnv` | Doc backend tu `servers.json` hoac env. |
+| `LoadBalancer/LoadBalancer.cs` | `AddServer`, `StartAsync`, `HandleClientAsync`, `SelectServer`, `SelectServerForRouteAsync`, `GetRoomOwnerServerIdAsync`, `ClaimOwnerForLegacyRoomAsync`, `ForwardAsync`, `HealthCheckLoop`, `PingAsync` | TCP/UDP proxy, route theo tai, route theo room owner, health check backend. |
+
+## 5. Da luong va bat dong bo
+
+Du an dung ket hop `Thread`, `Task.Run`, `async/await`, `Timer`, `lock`, `SemaphoreSlim` va `BlockingCollection` de server/client khong bi treo khi nhieu nguoi ket noi, gui packet, ve realtime, goi AI hoac ghi DB.
+
+| Muc dich | File/ham | Doan code/ky thuat xu ly |
+| --- | --- | --- |
+| Tach UI login khoi network blocking | `DrawingClient/Forms/LoginForm.cs` - `EnsureConnectedAsync()` | Dung `await Task.Run(() => _network.Connect(...))`, `await Task.Run(() => _network.ConnectRelay(...))` de viec ket noi TCP/TLS khong khoa UI. |
+| Route LB bat dong bo | `DrawingClient/Network/LoadBalancerRouteClient.cs` - `ResolveAsync(...)` | Dung `TcpClient.ConnectAsync`, `stream.WriteAsync`, `reader.ReadLineAsync`, `Task.WhenAny(..., Task.Delay(timeoutMs))` de co timeout khi hoi `ROUTE`. |
+| Thread nhan packet TCP rieng | `DrawingClient/Network/ClientNetwork.cs` - `Connect(...)`, `ConnectRelay(...)` | Tao `_receiveThread = new Thread(ReceiveLoop)` de doc packet lien tuc o background. |
+| Thread heartbeat rieng | `DrawingClient/Network/ClientNetwork.cs` - `HeartbeatLoop()` | Tao `_heartbeatThread = new Thread(HeartbeatLoop)`, lap `Thread.Sleep(100)`, gui heartbeat dinh ky va phat hien timeout server. |
+| Khoa ghi stream client | `DrawingClient/Network/ClientNetwork.cs` - `Send(Packet packet)` | Dung `lock (_stream)` de tranh nhieu luong ghi cung luc lam vo packet length-prefix. |
+| UDP client listen background | `DrawingClient/Network/UdpManager.cs` - `Start()`, `ListenLoop(...)` | Dung `_listenTask = Task.Run(() => ListenLoop(_cts.Token))` de nhan UDP nen. |
+| Timer flush cursor realtime | `DrawingClient/Forms/MainForm.cs` | Dung `System.Threading.Timer realtimePointerTimer` goi `FlushRealtimePointerState()` theo chu ky, gui latest cursor thay vi moi mouse move. |
+| Marshal event ve UI thread | `LoginForm`, `LobbyForm`, `MainForm`, `GalleryForm` | Dung `BeginInvoke(...)`/`UIInvoke(...)` de packet tu network thread cap nhat WinForms an toan. |
+| Khoa du lieu canvas/object | `DrawingClient/Drawing/CanvasManager.cs` | Dung `lock (textLock)`, `lock (imageLock)`, `lock (stickerLock)`, `lock (cursorLock)` khi render/update object va cursor. |
+| Gioi han goi AI dong thoi | `DrawingClient/AI/StabilityAiClient.cs` | Dung `SemaphoreSlim RequestGate = new SemaphoreSlim(2, 2)` va `await RequestGate.WaitAsync(...)` de gioi han request AI cung luc. |
+| HTTP AI bat dong bo | `StabilityAiClient.GenerateImageAsync`, `RemoveBgClient.RemoveBackgroundAsync` | Dung `HttpClient.SendAsync`/`PostAsync`, `ReadAsByteArrayAsync`, `CancellationToken` de goi API ngoai ma khong khoa UI. |
+| Server accept nhieu TCP client | `DrawingServer/Network/SecureTcpServer.cs` - `StartAsync(...)` | Vong lap `AcceptTcpClientAsync`; moi client duoc xu ly bang `_ = Task.Run(() => HandleClientAsync(client))`. |
+| Server xu ly UDP song song | `DrawingServer/Network/SecureUdpServer.cs` - `StartAsync(...)` | Sau `ReceiveAsync`, moi datagram duoc dua vao `_ = Task.Run(() => HandlePacketAsync(result))`. |
+| Ghi packet server an toan | `DrawingServer/Network/ClientSession.cs`, `SecureTcpServer.SendPacketToClientAsync(...)` | Moi session co `SemaphoreSlim WriteLock`; server `await client.WriteLock.WaitAsync()` truoc khi ghi `SslStream`. |
+| Luu draw history nen | `DrawingServer/Services/Database/StrokePersistenceQueue.cs` | Dung `BlockingCollection<StrokeRecord>` va `Task.Run(ProcessQueueAsync)` de luu DB nen co retry/backoff, khong chan realtime broadcast. |
+| Lock room state | `DrawingServer/Services/RoomService.cs` | Dung `lock (SyncRoot)` khi them/xoa member, chuyen luot, doc room state de tranh race giua nhieu client. |
+| Cross-server listener nen | `DrawingServer/Services/CrossServerSyncService.cs` | Dung `_ = Task.Run(() => ListenLoopAsync(...))`; `SemaphoreSlim PublishLock` serialize publish PostgreSQL notify. |
+| Heartbeat server node nen | `DrawingServer/Services/ServerNodeHeartbeatService.cs` | Dung `_ = Task.Run(() => HeartbeatLoopAsync(...))`, dinh ky update `ServerNodes`. |
+| LoadBalancer chay song song | `LoadBalancer/LoadBalancer.cs` - `StartAsync(...)` | Start `HealthCheckLoop` va `StartUdpProxyAsync` bang `Task.Run`; moi TCP client xu ly bang `Task.Run(() => HandleClientAsync(client))`. |
+| Proxy TCP bat dong bo | `LoadBalancer/LoadBalancer.cs` - `ForwardAsync(...)` | Dung `ReadAsync`/`WriteAsync` cho 2 chieu client-server, `Task.WhenAny(t1, t2)` de dong proxy khi mot chieu ket thuc. |
+| Health check bat dong bo | `LoadBalancer/LoadBalancer.cs` - `HealthCheckLoop()`, `PingAsync(...)` | Ping backend bang `TcpClient.ConnectAsync`, TLS handshake async va timeout bang `Task.WhenAny`. |
+
+Vi du code tieu bieu:
+
+```csharp
+// DrawingServer/Network/SecureTcpServer.cs
+TcpClient client = await _listener.AcceptTcpClientAsync();
+_ = Task.Run(() => HandleClientAsync(client));
+```
+
+```csharp
+// DrawingClient/Network/ClientNetwork.cs
+_receiveThread = new Thread(ReceiveLoop) { IsBackground = true, Name = "TCP-Recv" };
+_heartbeatThread = new Thread(HeartbeatLoop) { IsBackground = true, Name = "TCP-Heartbeat" };
+```
+
+```csharp
+// DrawingServer/Services/Database/StrokePersistenceQueue.cs
+private static readonly BlockingCollection<StrokeRecord> Queue = new BlockingCollection<StrokeRecord>();
+Task.Run(ProcessQueueAsync);
+```
+
+```csharp
+// DrawingServer/Network/ClientSession.cs
+public SemaphoreSlim WriteLock { get; } = new SemaphoreSlim(1, 1);
+```
+
+## 6. Cryptography - ma hoa du lieu de bao mat thong tin
+
+| Muc dich | File/ham | Mo ta |
+| --- | --- | --- |
+| Ma hoa UDP payload | `SharedLib/Security/AesHelper.cs` - `Encrypt(byte[] data)` | Dung AES voi key/IV trong `SecurityConfig`, ma hoa packet UDP truoc khi gui. |
+| Giai ma UDP payload | `SharedLib/Security/AesHelper.cs` - `Decrypt(byte[] data)` | Giai ma du lieu UDP ma client/server nhan duoc. |
+| Tu kiem tra AES | `SharedLib/Security/AesHelper.cs` - `TestRoundTrip(...)` | Encrypt roi decrypt lai chuoi test de xac nhan cau hinh AES dung. |
+| Cau hinh khoa AES | `SharedLib/Security/SecurityConfig.cs` - `AesKey`, `AesIV` | Khoa/IV dung chung cho UDP/AES. |
+| UDP client ma hoa khi gui | `DrawingClient/Network/UdpManager.cs` - `SendPacket(...)` | Serialize `Packet`, goi `AesHelper.Encrypt`, gui bang `UdpClient.Send`. |
+| UDP client giai ma khi nhan | `DrawingClient/Network/UdpManager.cs` - `ProcessPacket(...)` | Nhan datagram UDP, goi `AesHelper.Decrypt`, parse packet va raise event. |
+| UDP server giai ma khi nhan | `DrawingServer/Network/SecureUdpServer.cs` - `HandlePacketAsync(...)` | Decrypt datagram tu client, xu ly cursor/realtime/pixel. |
+| UDP server ma hoa khi tra loi | `DrawingServer/Network/SecureUdpServer.cs` | Tao packet response, `AesHelper.Encrypt(packet.Serialize())`, gui ve client. |
+| TLS server | `DrawingServer/Network/SecureTcpServer.cs` - `StartAsync(...)`, `HandleClientAsync(...)` | Load certificate `.pfx`, boc `TcpClient` bang `SslStream`, `AuthenticateAsServerAsync`. |
+| TLS client | `DrawingClient/Network/ClientNetwork.cs` - `Connect(...)`, `ConnectRelay(...)`, `AuthenticateSslWithTimeout(...)` | Boc stream bang `SslStream`, authenticate TLS 1.2 den DrawingServer. |
+| TLS health check | `LoadBalancer/LoadBalancer.cs` - `PingAsync(...)` | LB kiem tra backend bang TCP connect + TLS handshake. |
+| Bam mat khau | `DrawingServer/Services/Database/DbManager.cs` - `ComputeSha256Hash(...)`, `LoginAsync(...)` | Bam password SHA-256 truoc khi so sanh/luu vao bang `Users`. |
+
+Ket luan: du an co 3 lop bao mat chinh: TLS cho TCP, AES cho UDP, SHA-256 cho password trong DB.
+
+Vi du code tieu bieu:
+
+```csharp
+// SharedLib/Security/AesHelper.cs
+public static byte[] Encrypt(byte[] data)
+public static byte[] Decrypt(byte[] data)
+```
+
+```csharp
+// DrawingClient/Network/UdpManager.cs
+byte[] encrypted = AesHelper.Encrypt(packet.Serialize());
+byte[] decrypted = AesHelper.Decrypt(data);
+```
+
+```csharp
+// DrawingServer/Network/SecureTcpServer.cs
+_serverCertificate = new X509Certificate2(pfxPath, pfxPassword);
+SslStream sslStream = new SslStream(tcpClient.GetStream(), false);
+await sslStream.AuthenticateAsServerAsync(_serverCertificate, clientCertificateRequired: false, checkCertificateRevocation: true);
+```
+
+```csharp
+// DrawingServer/Services/Database/DbManager.cs
+using (System.Security.Cryptography.SHA256 sha256Hash = System.Security.Cryptography.SHA256.Create())
+```
+
+## 7. Load Balancing - phan chia cong viec hop ly cho cac Server
+
+| Muc dich | File/ham | Mo ta |
+| --- | --- | --- |
+| Cau hinh backend | `LoadBalancer/Program.cs` - `TryLoadServersFromJson`, `AddServersFromEnv`; `LoadBalancer/LoadBalancer.cs` - `AddServer` | Nap danh sach DrawingServer tu `servers.json` hoac env. |
+| Start LB | `LoadBalancer/LoadBalancer.cs` - `StartAsync(int listenPort, int udpPort)` | Start health check, UDP proxy, TCP listener. |
+| Xu ly client TCP | `LoadBalancer/LoadBalancer.cs` - `HandleClientAsync(TcpClient clientConn)` | Phan biet `ROUTE`, `RELAY`, hoac proxy default; tao ket noi sang backend va forward stream. |
+| Chon server theo tai | `LoadBalancer/LoadBalancer.cs` - `SelectServer()` | Chon server healthy co `ActiveProxyConnections + RoutedClients` thap nhat. |
+| Route theo server id | `LoadBalancer/LoadBalancer.cs` - `SelectServerById(...)` | Tim backend theo `server_id` khi client gui `RELAY server=<id>`. |
+| Room-affinity | `LoadBalancer/LoadBalancer.cs` - `SelectServerForRouteAsync(roomCode)` | Voi room cu, doc owner server trong DB/cache de dua client vao dung DrawingServer cua phong. |
+| Doc owner room tu DB | `LoadBalancer/LoadBalancer.cs` - `GetRoomOwnerServerIdAsync(...)` | Query `Rooms.owner_server_id` bang Npgsql. |
+| Claim owner cho room legacy | `LoadBalancer/LoadBalancer.cs` - `ClaimOwnerForLegacyRoomAsync(...)`, `SelectServerByRoomHash(...)` | Neu room cu chua co owner, LB chon owner on dinh theo hash room va update DB. |
+| Cap nhat server health | `LoadBalancer/LoadBalancer.cs` - `HealthCheckLoop()`, `PingAsync(...)`, `RefreshAndSelectServerByIdAsync(...)` | Ping TLS backend moi 5 giay, danh dau online/offline, ping lai owner stale truoc khi fail. |
+| Proxy TCP 2 chieu | `LoadBalancer/LoadBalancer.cs` - `ForwardAsync(...)` | Forward byte stream giua client va backend, giu TLS end-to-end toi DrawingServer. |
+| UDP proxy local/LAN | `LoadBalancer/LoadBalancer.cs` - `StartUdpProxyAsync`, `HandleUdpFromClientAsync`, `UdpProxySession` | Proxy datagram UDP tu client sang backend, dung cho local/LAN khi bat UDP proxy. |
+| Client route truoc khi join | `DrawingClient/Network/LoadBalancerRouteClient.cs` - `ResolveAsync(...)`; `ClientNetwork.ReconnectToRoomOwnerViaLoadBalancerAsync(...)` | Client hoi LB `ROUTE room=<code>`, reconnect vao owner server truoc khi gui `JOIN_ROOM`. |
+| Server gan owner khi tao room | `DrawingServer/Services/Database/DbManager.cs` - `CreateRoomAsync(...)` | Insert `Rooms.owner_server_id = SERVER_ID`, giup LB route dung backend ve sau. |
+
+Ket luan: Load Balancer khong chi chia tai theo so ket noi, ma con giu room-affinity de tat ca client trong cung phong vao cung backend, tranh mat dong bo.
+
+## 8. Database
+
+Bang active chinh:
+
+- `Users`: tai khoan va password hash.
+- `Rooms`: metadata phong, owner user, owner server, canvas size, max members.
+- `DrawHistory`: lich su draw action de replay board.
+- `ChatHistory`: lich su chat.
+- `Gallery`: anh da luu va public token.
+- `AiResults`: ket qua AI.
+- `ActionStack`: undo/redo persistent.
+- `PixelArtCells`: trang thai pixel art.
+- `ServerNodes`: heartbeat backend server.
+- `RoomEvents`: fallback cross-server sync.
+
+DB duoc truy cap chu yeu qua `DrawingServer/Services/Database/DbManager.cs`. LoadBalancer cung doc/update `Rooms.owner_server_id` de route phong.
+
+## 9. Setup nhanh
+
+Copy env:
+
+```powershell
+Copy-Item .\.env.example .\.env
+Copy-Item .\setup\.env.example .\setup\.env
+```
+
+Dien cac bien quan trong:
+
+```env
+DATABASE_URL=postgresql://...
+SERVER_CERT_PATH=...
+SERVER_CERT_PASSWORD=...
+HF_TOKEN=...
+HF_IMAGE_MODEL=stabilityai/stable-diffusion-xl-base-1.0
+REMOVE_BG_API_KEY=...
+MAX_ROOM_MEMBERS=5
+```
+
+Restore/build:
+
+```powershell
+dotnet restore .\NT106_DrawingApp.sln /p:RestorePackagesConfig=true
+dotnet build .\NT106_DrawingApp.sln -v:minimal
+```
+
+Test:
+
+```powershell
+dotnet test .\NT106Tests\NT106Tests.csproj -v:minimal
+```
+
+## 10. Cac kich ban chay demo
+
+### 1 server local, khong LoadBalancer
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup\start-local-no-lb.ps1 -StopExisting
+```
+
+Smoke server, khong mo client:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup\start-local-no-lb.ps1 -ClientCount 0 -StopExisting
+```
+
+### 2 server + LoadBalancer local
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup\start-local-with-lb.ps1 -StopExisting
+```
+
+### LAN direct
+
+Server:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup\start-server.ps1 -ServerId server-1 -StopExisting
+```
+
+Client:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup\start-client.ps1 -Mode Direct -Host <server-lan-ip>
+```
+
+### Internet qua ngrok + LoadBalancer
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup\start-local-with-lb.ps1 -ClientCount 0 -StartNgrok -StopExisting
+```
+
+Client Internet:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup\start-client.ps1 -Mode LbRelay -InternetNgrok -Host <ngrok-host> -TcpPort <ngrok-port>
+```
+
+### Internet direct server, khong LoadBalancer
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup\start-server.ps1 -ServerId server-1 -StartNgrok -StopExisting
+powershell -ExecutionPolicy Bypass -File .\setup\start-client.ps1 -Mode Direct -InternetNgrok -Host <ngrok-host> -TcpPort <ngrok-port>
+```
+
+## 11. Goi release
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup\package-release.ps1
+```
+
+Lenh nay build Release, copy exe/DLL vao `setup/apps`, va tao lai `NT106-DrawingApp-setup.zip`.
+
+## 12. Ghi chu trang thai
+
+- Draw/fill/text quan trong dang di TCP reliable.
+- UDP chu yeu dung cho cursor/tin hieu tam thoi trong local/LAN.
+- Internet ngrok chi public TCP, client tu dung TCP fallback.
+- Cross-server sync bang PostgreSQL LISTEN/NOTIFY chi la fallback; room-affinity cua LoadBalancer moi la duong chinh.
+- Mot so tinh nang da bi loai khoi scope hien tai: GIF export, snapshot, claim area/khoa vung ve, reaction, sticker rotate UI, sticky note replies.
+- Mot so tinh nang con backlog/can chot neu muon hoan thien: spectator chi xem/chat, pixel art UI 64x64 tich hop canvas, follow viewport day du.

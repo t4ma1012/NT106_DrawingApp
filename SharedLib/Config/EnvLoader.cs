@@ -12,6 +12,8 @@ namespace SharedLib.Config
 
         public static void Load(string explicitPath = null, bool reload = false)
         {
+            // XU LY DA LUONG: EnvLoader co the duoc goi tu client/server/LB luc khoi dong,
+            // lock giup qua trinh doc file .env chi chay mot lan va khong bi race khi nhieu thread goi.
             lock (SyncRoot)
             {
                 if (_loaded && !reload)
@@ -29,6 +31,7 @@ namespace SharedLib.Config
                     return;
                 }
 
+                // I/O FILE NHAP TU MAY: doc tung dong tu file .env tren o dia vao bien moi truong process.
                 foreach (string rawLine in File.ReadAllLines(envPath))
                 {
                     if (string.IsNullOrWhiteSpace(rawLine))
@@ -92,6 +95,7 @@ namespace SharedLib.Config
         {
             if (!string.IsNullOrWhiteSpace(explicitPath))
             {
+                // I/O FILE: chuan hoa duong dan .env nguoi dung truyen vao va kiem tra file co ton tai.
                 string full = Path.GetFullPath(explicitPath);
                 if (File.Exists(full))
                     return full;
@@ -106,6 +110,7 @@ namespace SharedLib.Config
                 string current = start;
                 for (int i = 0; i < 8 && !string.IsNullOrWhiteSpace(current); i++)
                 {
+                    // I/O FILE: di nguoc len cac thu muc cha de tim file .env gan nhat.
                     string candidate = Path.Combine(current, ".env");
                     if (File.Exists(candidate))
                         return candidate;

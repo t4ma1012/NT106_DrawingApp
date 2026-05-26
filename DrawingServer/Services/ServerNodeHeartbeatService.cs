@@ -18,6 +18,7 @@ namespace DrawingServer.Services
                 return;
 
             _cts = new CancellationTokenSource();
+            // XU LY DA LUONG: heartbeat server node chay nen, khong anh huong luong xu ly packet TCP/UDP.
             _ = Task.Run(() => HeartbeatLoopAsync(tcpPort, udpPort, _cts.Token));
         }
 
@@ -39,10 +40,12 @@ namespace DrawingServer.Services
 
             while (!token.IsCancellationRequested)
             {
+                // KET NOI DU LIEU/BAT DONG BO: cap nhat ServerNodes dinh ky vao PostgreSQL.
                 await SendHeartbeatAsync(serverId, serverName, host, tcpPort, udpPort, maxConnections);
 
                 try
                 {
+                    // XU LY BAT DONG BO: delay co CancellationToken de Stop() dung duoc ngay.
                     await Task.Delay(intervalMs, token);
                 }
                 catch (TaskCanceledException)

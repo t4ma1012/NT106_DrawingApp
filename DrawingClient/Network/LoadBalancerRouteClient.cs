@@ -21,6 +21,7 @@ namespace DrawingClient.Network
         public static async Task<ServerRouteInfo> ResolveAsync(string lbHost, int lbPort, int timeoutMs = 2500, string roomCode = "")
         {
             using var tcp = new TcpClient();
+            // XU LY BAT DONG BO: ConnectAsync + Task.WhenAny tao timeout khi LB khong phan hoi.
             var connectTask = tcp.ConnectAsync(lbHost, lbPort);
             if (await Task.WhenAny(connectTask, Task.Delay(timeoutMs)) != connectTask || !tcp.Connected)
                 throw new TimeoutException("Timeout while connecting to load balancer.");
@@ -33,11 +34,13 @@ namespace DrawingClient.Network
                 ? "ROUTE\n"
                 : $"ROUTE room={roomCode.Trim()}\n";
             byte[] req = Encoding.ASCII.GetBytes(routeCommand);
+            // XU LY BAT DONG BO: gui lenh ROUTE den LoadBalancer qua NetworkStream async.
             await stream.WriteAsync(req, 0, req.Length);
             await stream.FlushAsync();
 
             using var reader = new StreamReader(stream, Encoding.UTF8, false, 1024, true);
             var readTask = reader.ReadLineAsync();
+            // XU LY BAT DONG BO: cho dong JSON route voi timeout de tranh treo man hinh join.
             if (await Task.WhenAny(readTask, Task.Delay(timeoutMs)) != readTask)
                 throw new TimeoutException("Timeout while waiting for load balancer route.");
 

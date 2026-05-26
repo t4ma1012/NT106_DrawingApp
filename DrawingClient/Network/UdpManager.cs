@@ -48,6 +48,7 @@ namespace DrawingClient.Network
             LocalPort = ((IPEndPoint)_socket.Client.LocalEndPoint).Port;
 
             _cts = new CancellationTokenSource();
+            // XU LY BAT DONG BO/DA LUONG: listen UDP tren task nen de client van gui TCP/UI binh thuong.
             _listenTask = Task.Run(() => ListenLoop(_cts.Token));
 
             Console.WriteLine($"[UdpManager] Khởi động trên port {LocalPort}");
@@ -65,6 +66,7 @@ namespace DrawingClient.Network
                 string json = JsonConvert.SerializeObject(payload);
                 byte[] payloadBytes = Encoding.UTF8.GetBytes(json);
                 Packet packet = new Packet { Cmd = cmd, Payload = payloadBytes };
+                // MA HOA: moi packet UDP duoc ma hoa AES truoc khi gui ra mang.
                 byte[] encrypted = AesHelper.Encrypt(packet.Serialize());
                 _socket.Send(encrypted, encrypted.Length, _serverEndpoint);
             }
@@ -103,6 +105,7 @@ namespace DrawingClient.Network
 
         private void ListenLoop(CancellationToken token)
         {
+            // XU LY DA LUONG: vong lap nhan UDP chay tren background task, doc lien tuc datagram tu server.
             IPEndPoint remoteEP = new IPEndPoint(IPAddress.Any, 0);
             while (!token.IsCancellationRequested)
             {
@@ -119,6 +122,7 @@ namespace DrawingClient.Network
         {
             try
             {
+                // MA HOA: giai ma AES truoc khi deserialize Packet va day vao NetworkEvents.
                 byte[] decrypted = AesHelper.Decrypt(data);
                 Packet packet = Packet.Deserialize(decrypted);
                 string json = Encoding.UTF8.GetString(packet.Payload);

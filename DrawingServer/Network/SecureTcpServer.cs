@@ -39,9 +39,13 @@ namespace DrawingServer.Network
 
                 while (true)
                 {
+                    // XU LY BAT DONG BO: server cho client moi bang AcceptTcpClientAsync.
+                    // Trong luc chua co client moi, thread se duoc tra ve ThreadPool thay vi bi block cung.
                     TcpClient client = await _listener.AcceptTcpClientAsync();
                     client.NoDelay = true;
                     Logger.Info("TCP", $"[+] Client mới: {client.Client.RemoteEndPoint}");
+                    // XU LY DA LUONG: moi client duoc xu ly tren mot task rieng de phuc vu nhieu client dong thoi.
+                    // Nho vay 1 client dang gui history/anh lon khong chan client khac login/join/draw.
                     _ = Task.Run(() => HandleClientAsync(client));
                 }
             }
@@ -59,6 +63,8 @@ namespace DrawingServer.Network
 
             try
             {
+                // MA HOA/TLS: xac thuc TLS server bang certificate .pfx truoc khi doc/ghi packet.
+                // Tu day tro di session.SecureStream la SslStream, toan bo payload TCP duoc ma hoa.
                 await sslStream.AuthenticateAsServerAsync(_serverCertificate, clientCertificateRequired: false, checkCertificateRevocation: true);
                 session.SecureStream = sslStream;
                 Clients.TryAdd(clientId, session);
@@ -69,6 +75,8 @@ namespace DrawingServer.Network
                 while (true)
                 {
                     byte[] lenBuf = new byte[4];
+                    // XU LY BAT DONG BO: doc stream TLS theo length-prefix bang ReadAsync.
+                    // Server doc dung 4 byte length truoc, sau do moi doc packet body de tranh cat/ghep packet TCP sai.
                     if (!await ReadExactAsync(sslStream, lenBuf, 4)) break;
 
                     if (BitConverter.IsLittleEndian) Array.Reverse(lenBuf);
@@ -762,6 +770,7 @@ namespace DrawingServer.Network
             byte[] lenBytes = BitConverter.GetBytes(data.Length);
             if (BitConverter.IsLittleEndian) Array.Reverse(lenBytes);
 
+            // XU LY DA LUONG: serialize viec ghi SslStream tren tung client de tranh race khi broadcast song song.
             await client.WriteLock.WaitAsync();
             try
             {
@@ -834,6 +843,7 @@ namespace DrawingServer.Network
             byte[] lenBytes = BitConverter.GetBytes(data.Length);
             if (BitConverter.IsLittleEndian) Array.Reverse(lenBytes);
 
+            // XU LY DA LUONG: static broadcast cung dung WriteLock de khong ghi xen ke packet.
             await client.WriteLock.WaitAsync();
             try
             {

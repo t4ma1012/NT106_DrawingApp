@@ -22,6 +22,7 @@ namespace DrawingServer.Services
         private static NpgsqlConnection? _listenConn;
         private static CancellationTokenSource? _cts;
         private static volatile bool _started;
+        // XU LY DA LUONG: serialize publish de tranh nhieu task cung mo/ghep NOTIFY PostgreSQL qua nhanh.
         private static readonly SemaphoreSlim PublishLock = new SemaphoreSlim(1, 1);
 
         private sealed class NotifyPayload
@@ -48,6 +49,7 @@ namespace DrawingServer.Services
 
             _cts = new CancellationTokenSource();
             _started = true;
+            // XU LY DA LUONG: LISTEN/NOTIFY chay tren background task, khong chan server TCP/UDP.
             _ = Task.Run(() => ListenLoopAsync(_cts.Token));
             Logger.Info("CrossSync", $"Started LISTEN/NOTIFY on channel '{NotifyChannel}' as {_serverId}");
         }
@@ -76,9 +78,11 @@ namespace DrawingServer.Services
             };
             string notifyJson = JsonConvert.SerializeObject(notify);
 
+            // XU LY BAT DONG BO/DA LUONG: WaitAsync khong block thread, nhung van dam bao moi lan chi 1 publish vao DB.
             await PublishLock.WaitAsync();
             try
             {
+                // KET NOI DU LIEU: mo connection Npgsql rieng de insert RoomEvents va pg_notify.
                 using var conn = new NpgsqlConnection(_connString);
                 await conn.OpenAsync();
 
@@ -97,6 +101,7 @@ SELECT pg_notify(@channel, @notify_payload);";
                 cmd.Parameters.AddWithValue("room_code", roomCode);
                 cmd.Parameters.AddWithValue("channel", NotifyChannel);
                 cmd.Parameters.AddWithValue("notify_payload", notifyJson);
+                // KET NOI DU LIEU/BAT DONG BO: ghi event va phat notify qua PostgreSQL.
                 await cmd.ExecuteNonQueryAsync();
             }
             catch (Exception ex)
@@ -115,6 +120,7 @@ SELECT pg_notify(@channel, @notify_payload);";
             {
                 try
                 {
+                    // KET NOI DU LIEU: connection nay duoc giu mo de LISTEN room_events.
                     _listenConn = new NpgsqlConnection(_connString);
                     await _listenConn.OpenAsync(token);
                     _listenConn.Notification += OnNotification;
@@ -126,6 +132,7 @@ SELECT pg_notify(@channel, @notify_payload);";
 
                     while (!token.IsCancellationRequested)
                     {
+                        // XU LY BAT DONG BO: Wait() giu listener doi NOTIFY tren background task rieng.
                         _listenConn.Wait();
                     }
                 }

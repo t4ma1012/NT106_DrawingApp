@@ -21,8 +21,8 @@ namespace DrawingServer.Network
         public SslStream? SecureStream { get; set; }
         public volatile bool IsDisconnected;
 
-        // ✅ Lock để đảm bảo chỉ 1 task ghi vào stream tại một thời điểm
-        // Tránh race condition khi broadcast nhiều lệnh cùng lúc
+        // XU LY DA LUONG: chi cho 1 task ghi vao SslStream tai mot thoi diem.
+        // Neu khong khoa, nhieu broadcast cung luc co the lam vo packet TCP.
         public SemaphoreSlim WriteLock { get; } = new SemaphoreSlim(1, 1);
 
         public ClientSession(TcpClient tcpClient)

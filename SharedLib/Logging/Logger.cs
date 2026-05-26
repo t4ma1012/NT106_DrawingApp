@@ -27,18 +27,21 @@ namespace SharedLib.Logging
         /// <summary>Khởi tạo logger. Gọi MỘT lần khi ứng dụng start.</summary>
         public static void Initialize(string logFileName = null)
         {
+            // XU LY DA LUONG: nhieu service co the log luc khoi dong, lock dam bao chi tao StreamWriter mot lan.
             lock (_lock)
             {
                 if (_initialized) return;
 
                 try
                 {
+                    // I/O FILE XUAT RA MAY: tao thu muc logs trong thu muc app neu chua co.
                     if (!Directory.Exists(LogDir))
                         Directory.CreateDirectory(LogDir);
 
                     string filename = logFileName ?? $"{DateTime.Now:yyyy-MM-dd_HHmmss}.log";
                     string logPath = Path.Combine(LogDir, filename);
 
+                    // I/O FILE XUAT RA MAY: mo file log de append, AutoFlush giup ghi ngay sau moi dong log.
                     _logFile = new StreamWriter(logPath, true, Encoding.UTF8)
                     { AutoFlush = true };
 
@@ -79,6 +82,7 @@ namespace SharedLib.Logging
 
         private static void Log(LogLevel level, string component, string message)
         {
+            // XU LY DA LUONG: nhieu thread/task cung log, lock giu console/file output khong bi xen dong.
             lock (_lock)
             {
                 string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
@@ -101,6 +105,7 @@ namespace SharedLib.Logging
                 {
                     try
                     {
+                        // I/O FILE XUAT RA MAY: ghi dong log da format vao file .log.
                         _logFile.WriteLine(formattedMessage);
                     }
                     catch { /* Bỏ qua lỗi file */ }
@@ -111,6 +116,7 @@ namespace SharedLib.Logging
         /// <summary>Đóng log file khi ứng dụng tắt.</summary>
         public static void Close()
         {
+            // I/O FILE: flush va dong StreamWriter de day het buffer log xuong o dia.
             lock (_lock)
             {
                 _logFile?.Flush();

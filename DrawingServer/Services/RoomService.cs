@@ -41,10 +41,12 @@ namespace DrawingServer.Services
                 if (string.IsNullOrWhiteSpace(ownerUsername))
                     return (false, "", "Invalid owner username");
 
+                // KET NOI DU LIEU/BAT DONG BO: tao phong trong PostgreSQL truoc khi cap nhat room state RAM.
                 string roomCode = await DbManager.CreateRoomAsync(ownerUsername, canvasWidth, canvasHeight);
                 if (string.IsNullOrEmpty(roomCode))
                     return (false, "", "Failed to create room in database");
 
+                // XU LY DA LUONG: khoa ActiveRooms de nhieu client tao/join room khong sua dictionary cung luc.
                 lock (SyncRoot)
                 {
                     if (!ActiveRooms.ContainsKey(roomCode))
@@ -79,6 +81,7 @@ namespace DrawingServer.Services
                 if (string.IsNullOrWhiteSpace(roomCode) || clientSession == null || string.IsNullOrWhiteSpace(clientSession.Username))
                     return (false, "Invalid join request");
 
+                // KET NOI DU LIEU/BAT DONG BO: check room ton tai trong PostgreSQL truoc khi them member.
                 bool roomExists = await DbManager.CheckRoomExistsAsync(roomCode);
                 if (!roomExists)
                     return (false, "Room does not exist");
@@ -86,6 +89,7 @@ namespace DrawingServer.Services
                 string ownerUsername = string.Empty;
                 bool createNewRoomState = false;
 
+                // XU LY DA LUONG: doc/tao RoomState trong RAM duoc bao ve bang lock.
                 lock (SyncRoot)
                 {
                     if (!ActiveRooms.ContainsKey(roomCode))

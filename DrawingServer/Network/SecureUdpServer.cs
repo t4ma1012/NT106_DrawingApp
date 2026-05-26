@@ -28,7 +28,9 @@ namespace DrawingServer.Network
             {
                 try
                 {
+                    // XU LY BAT DONG BO: ReceiveAsync cho UDP datagram ma khong khoa vong lap server.
                     UdpReceiveResult result = await _udpListener.ReceiveAsync();
+                    // XU LY DA LUONG: moi goi UDP duoc xu ly tren task rieng de nhan goi tiep theo nhanh hon.
                     _ = Task.Run(() => HandlePacketAsync(result));
                 }
                 catch (Exception ex)
@@ -43,6 +45,7 @@ namespace DrawingServer.Network
             try
             {
                 // Bước 1: Giải mã AES-256
+                // MA HOA: giai ma AES-256 truoc khi deserialize packet UDP.
                 byte[] decryptedBytes = AesHelper.Decrypt(result.Buffer);
                 Packet packet = Packet.Deserialize(decryptedBytes);
                 if (packet.Cmd == CommandType.LASER)

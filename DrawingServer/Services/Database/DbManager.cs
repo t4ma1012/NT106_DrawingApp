@@ -16,12 +16,14 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
         }
 
         // Nhớ kiểm tra lại mật khẩu Database của bạn (đang để mặc định là 123456)
+        // KET NOI DU LIEU: lay DATABASE_URL tu env va chuan hoa chuoi ket noi cho Npgsql.
         private static string connString => PostgresConnectionString.Normalize(EnvLoader.GetRequired("DATABASE_URL"));
 
         internal static async Task<bool> SaveStrokeRecordAsync(string roomCode, string actionId, string strokeData, string username)
         {
             try
             {
+                // KET NOI DU LIEU: moi thao tac DB mo connection rieng va dung async OpenAsync.
                 using var conn = new NpgsqlConnection(connString);
                 await conn.OpenAsync();
 
@@ -36,6 +38,7 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
                 cmdInsert.Parameters.AddWithValue("s", strokeData ?? "{}");
                 cmdInsert.Parameters.AddWithValue("u", username ?? "");
 
+                // KET NOI DU LIEU: ExecuteNonQueryAsync ghi DrawHistory ma khong chan thread server.
                 int rows = await cmdInsert.ExecuteNonQueryAsync();
                 if (rows <= 0)
                 {
@@ -56,6 +59,7 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
         private static string ComputeSha256Hash(string rawData)
         {
             if (string.IsNullOrEmpty(rawData)) return "";
+            // MA HOA/HASH: bam mat khau bang SHA-256 truoc khi so sanh hoac luu DB.
             using (System.Security.Cryptography.SHA256 sha256Hash = System.Security.Cryptography.SHA256.Create())
             {
                 byte[] bytes = sha256Hash.ComputeHash(System.Text.Encoding.UTF8.GetBytes(rawData));
@@ -71,6 +75,7 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
         {
             try
             {
+                // KET NOI DU LIEU/BAT DONG BO: LoginAsync mo connection PostgreSQL va truy van Users bang await.
                 using var conn = new NpgsqlConnection(connString);
                 await conn.OpenAsync();
 
@@ -92,6 +97,7 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
                     using var cmdInsert = new NpgsqlCommand("INSERT INTO Users (username, password_hash) VALUES (@u, @p)", conn);
                     cmdInsert.Parameters.AddWithValue("u", username);
                     cmdInsert.Parameters.AddWithValue("p", hashedPass);
+                    // KET NOI DU LIEU/BAT DONG BO: user moi duoc insert vao Users bang lenh async.
                     await cmdInsert.ExecuteNonQueryAsync();
                     return (true, "Tạo tài khoản thành công!");
                 }
@@ -104,6 +110,7 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
         {
             try
             {
+                // KET NOI DU LIEU/BAT DONG BO: tao room bang connection PostgreSQL, cac query deu await.
                 using var conn = new NpgsqlConnection(connString);
                 await conn.OpenAsync();
 
@@ -484,6 +491,7 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
         {
             try
             {
+                // KET NOI DU LIEU/BAT DONG BO: xoa action stack cua room trong PostgreSQL.
                 using var conn = new NpgsqlConnection(connString);
                 await conn.OpenAsync();
 
@@ -523,6 +531,7 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
                 cmdInsert.Parameters.AddWithValue("u", username);
                 cmdInsert.Parameters.AddWithValue("m", message);
 
+                // KET NOI DU LIEU/BAT DONG BO: luu chat vao ChatHistory bang lenh async.
                 await cmdInsert.ExecuteNonQueryAsync();
                 return true;
             }
@@ -697,6 +706,7 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
             var actions = new List<ActionStackEntry>();
             try
             {
+                // KET NOI DU LIEU/BAT DONG BO: doc action stack undo/redo tu PostgreSQL.
                 using var conn = new NpgsqlConnection(connString);
                 await conn.OpenAsync();
 

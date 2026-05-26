@@ -35,13 +35,16 @@ namespace DrawingClient.AI
 
             try
             {
+                // KET NOI DU LIEU/NETWORK: goi Remove.bg bang HTTP async de UI khong bi khoa.
                 using var response = await client.PostAsync(ApiConfig.RemoveBgUrl, content, cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
+                    // XU LY BAT DONG BO: doc noi dung loi tu response stream bang async.
                     string error = await response.Content.ReadAsStringAsync();
                     throw BuildRemoveBgException(response.StatusCode, error);
                 }
 
+                // XU LY BAT DONG BO: doc bytes anh ket qua tu network stream.
                 return await response.Content.ReadAsByteArrayAsync();
             }
             catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
@@ -56,6 +59,7 @@ namespace DrawingClient.AI
             source.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
             byte[] inputBytes = ms.ToArray();
 
+            // XU LY BAT DONG BO: tai su dung ham async dang byte[] cho luong Bitmap.
             byte[] resultBytes = await RemoveBackgroundAsync(inputBytes, cancellationToken);
 
             using var resultMs = new MemoryStream(resultBytes);
