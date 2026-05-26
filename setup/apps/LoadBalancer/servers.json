@@ -2,14 +2,14 @@
     {
         "server_id":  "server-1",
         "name":  "DrawingServer-1",
-        "host":  "127.0.0.1",
+        "host":  "192.168.1.148",
         "tcp_port":  8888,
         "udp_port":  8889
     },
     {
         "server_id":  "server-2",
         "name":  "DrawingServer-2",
-        "host":  "127.0.0.1",
+        "host":  "192.168.1.78",
         "tcp_port":  8890,
         "udp_port":  8891
     }

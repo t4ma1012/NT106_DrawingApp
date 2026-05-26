@@ -321,29 +321,53 @@ namespace LoadBalancer
             if (string.IsNullOrWhiteSpace(roomCode))
                 return SelectServer();
 
-            if (_roomOwnerCache.TryGetValue(roomCode.Trim(), out string cachedOwnerId))
+            string normalizedRoomCode = roomCode.Trim();
+            if (_roomOwnerCache.TryGetValue(normalizedRoomCode, out string cachedOwnerId))
             {
                 ServerInfo cachedOwner = SelectServerById(cachedOwnerId);
                 if (cachedOwner != null)
                     return cachedOwner;
             }
 
-            string ownerServerId = await GetRoomOwnerServerIdAsync(roomCode);
+            string ownerServerId = await GetRoomOwnerServerIdAsync(normalizedRoomCode);
+            if (ownerServerId == null)
+            {
+                Console.WriteLine($"[LB] ROUTE room={normalizedRoomCode} blocked: room was not found in LoadBalancer database");
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(ownerServerId))
+            {
+                ServerInfo claimedOwner = await ClaimOwnerForLegacyRoomAsync(normalizedRoomCode);
+                if (claimedOwner != null)
+                    return claimedOwner;
+
+                Console.WriteLine($"[LB] ROUTE room={normalizedRoomCode} blocked: owner server is empty and no healthy server can claim it");
+                return null;
+            }
+
             ServerInfo owner = SelectServerById(ownerServerId);
             if (owner != null)
             {
-                _roomOwnerCache[roomCode.Trim()] = owner.ServerId;
+                _roomOwnerCache[normalizedRoomCode] = owner.ServerId;
                 return owner;
             }
 
-            Console.WriteLine($"[LB] ROUTE room={roomCode} blocked: owner server is unknown or unhealthy");
+            owner = await RefreshAndSelectServerByIdAsync(ownerServerId);
+            if (owner != null)
+            {
+                _roomOwnerCache[normalizedRoomCode] = owner.ServerId;
+                return owner;
+            }
+
+            Console.WriteLine($"[LB] ROUTE room={normalizedRoomCode} blocked: owner server '{ownerServerId}' is not configured or unhealthy");
             return null;
         }
 
         private async Task<string> GetRoomOwnerServerIdAsync(string roomCode)
         {
             if (string.IsNullOrWhiteSpace(roomCode) || string.IsNullOrWhiteSpace(DatabaseUrl))
-                return "";
+                return null;
 
             try
             {
@@ -355,13 +379,115 @@ namespace LoadBalancer
                     conn);
                 cmd.Parameters.AddWithValue("room_code", roomCode.Trim());
                 object result = await cmd.ExecuteScalarAsync();
-                return result == null || result == DBNull.Value ? "" : Convert.ToString(result) ?? "";
+                if (result == null || result == DBNull.Value)
+                    return null;
+
+                return Convert.ToString(result) ?? "";
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[LB] Room owner lookup failed for {roomCode}: {ex.Message}");
                 return "";
             }
+        }
+
+        private async Task<ServerInfo> ClaimOwnerForLegacyRoomAsync(string roomCode)
+        {
+            ServerInfo target = SelectServerByRoomHash(roomCode);
+            if (target == null)
+                return null;
+
+            try
+            {
+                using var conn = new NpgsqlConnection(PostgresConnectionString.Normalize(DatabaseUrl));
+                await conn.OpenAsync();
+
+                using var cmd = new NpgsqlCommand(
+                    @"UPDATE Rooms
+                      SET owner_server_id = @server_id
+                      WHERE room_code = @room_code
+                        AND (owner_server_id IS NULL OR owner_server_id = '')",
+                    conn);
+                cmd.Parameters.AddWithValue("server_id", target.ServerId);
+                cmd.Parameters.AddWithValue("room_code", roomCode);
+                int updated = await cmd.ExecuteNonQueryAsync();
+
+                if (updated > 0)
+                {
+                    _roomOwnerCache[roomCode] = target.ServerId;
+                    Console.WriteLine($"[LB] ROUTE room={roomCode} claimed legacy owner -> {target.Name}");
+                    return target;
+                }
+
+                string ownerServerId = await GetRoomOwnerServerIdAsync(roomCode);
+                ServerInfo owner = SelectServerById(ownerServerId) ?? await RefreshAndSelectServerByIdAsync(ownerServerId);
+                if (owner != null)
+                {
+                    _roomOwnerCache[roomCode] = owner.ServerId;
+                    return owner;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[LB] ROUTE room={roomCode} owner claim failed: {ex.Message}");
+            }
+
+            return null;
+        }
+
+        private ServerInfo SelectServerByRoomHash(string roomCode)
+        {
+            List<ServerInfo> healthyServers = new List<ServerInfo>();
+            lock (_lock)
+            {
+                foreach (var server in _servers)
+                {
+                    if (server.IsHealthy)
+                        healthyServers.Add(server);
+                }
+            }
+
+            if (healthyServers.Count == 0)
+                return null;
+
+            int hash = 17;
+            foreach (char ch in roomCode ?? "")
+                hash = unchecked(hash * 31 + char.ToUpperInvariant(ch));
+
+            int safeHash = hash == int.MinValue ? 0 : Math.Abs(hash);
+            int index = safeHash % healthyServers.Count;
+            return healthyServers[index];
+        }
+
+        private async Task<ServerInfo> RefreshAndSelectServerByIdAsync(string serverId)
+        {
+            if (string.IsNullOrWhiteSpace(serverId))
+                return null;
+
+            ServerInfo target = null;
+            lock (_lock)
+            {
+                foreach (var s in _servers)
+                {
+                    if (string.Equals(s.ServerId, serverId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        target = s;
+                        break;
+                    }
+                }
+            }
+
+            if (target == null)
+                return null;
+
+            bool healthy = await PingAsync(target.Host, target.TcpPort);
+            lock (_lock)
+            {
+                target.IsHealthy = healthy;
+                target.LastHealthCheck = DateTime.UtcNow;
+            }
+
+            return healthy ? target : null;
         }
 
         private static async Task<string> ReadAsciiLineAsync(NetworkStream stream, string initialText, int maxChars)

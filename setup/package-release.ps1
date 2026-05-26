@@ -7,12 +7,41 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 $setupRoot = Resolve-Path $PSScriptRoot
 $appsRoot = Join-Path $setupRoot 'apps'
 
+function Assert-NoSetupAppProcesses {
+    param([string]$AppsRoot)
+
+    $resolvedAppsRoot = (Resolve-Path $AppsRoot -ErrorAction SilentlyContinue)
+    if ($null -eq $resolvedAppsRoot) {
+        return
+    }
+
+    $rootPath = $resolvedAppsRoot.Path.TrimEnd('\') + '\'
+    $running = @(
+        Get-Process -ErrorAction SilentlyContinue |
+            Where-Object {
+                try {
+                    -not [string]::IsNullOrWhiteSpace($_.Path) -and
+                    $_.Path.StartsWith($rootPath, [System.StringComparison]::OrdinalIgnoreCase)
+                } catch {
+                    $false
+                }
+            } |
+            Select-Object ProcessName, Id, Path
+    )
+
+    if ($running.Count -gt 0) {
+        $details = $running | Format-Table -AutoSize | Out-String
+        throw "Dang co app chay tu setup/apps nen khong the package an toan. Hay dong cac cua so DrawingClient/DrawingServer/LoadBalancer hoac stop process roi chay lai.`n$details"
+    }
+}
+
 dotnet restore (Join-Path $repoRoot 'NT106_DrawingApp.sln') /p:RestorePackagesConfig=true
 if ($LASTEXITCODE -ne 0) { throw 'Restore failed.' }
 
 dotnet build (Join-Path $repoRoot 'NT106_DrawingApp.sln') -c $Configuration -v:minimal
 if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 
+Assert-NoSetupAppProcesses -AppsRoot $appsRoot
 Remove-Item -Recurse -Force $appsRoot -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $appsRoot | Out-Null
 

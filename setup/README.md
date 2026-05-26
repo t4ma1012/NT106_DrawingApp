@@ -292,4 +292,4 @@ Mot may co the dong nhieu vai tro. Quy tac:
 - Neu server khong mo TCP sau 25 giay, xem cua so server va log trong `setup\apps\DrawingServer`.
 - Neu client crash hoac hien loi sau login/join room, xem `setup\apps\DrawingClient\logs\client_log.txt`.
 - Neu client Internet khong ket noi duoc, ngrok phai la TCP tunnel vao LoadBalancer port `9000`, khong phai HTTP tunnel.
-- Neu client cung room bi route sai backend, kiem tra `servers.json` trong `setup\apps\LoadBalancer`.
+- Neu client cung room bi route sai backend, kiem tra `servers.json` trong `setup\apps\LoadBalancer`, `SERVER_ID` tren server va `Rooms.owner_server_id` trong database phai khop nhau. Neu LB bao `room was not found in LoadBalancer database`, server va LoadBalancer dang khong dung cung `DATABASE_URL`.
