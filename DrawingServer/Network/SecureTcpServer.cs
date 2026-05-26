@@ -6,6 +6,7 @@
 // ============================================================
 using System;
 using System.Linq;
+using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
@@ -72,7 +73,7 @@ namespace DrawingServer.Network
 
                     if (BitConverter.IsLittleEndian) Array.Reverse(lenBuf);
                     int packetLen = BitConverter.ToInt32(lenBuf, 0);
-                    if (packetLen <= 0 || packetLen > 5000000) break;
+                    if (packetLen <= 0 || packetLen > 50 * 1024 * 1024) break;
 
                     byte[] packetBuf = new byte[packetLen];
                     if (!await ReadExactAsync(sslStream, packetBuf, packetLen)) break;
@@ -216,8 +217,7 @@ namespace DrawingServer.Network
                                     Logger.Info("TCP", $"[JOIN] '{session.Username}' room={joinData.RoomCode} history={history.Count} strokes");
                                     if (history.Count > 0)
                                     {
-                                        string historyJson = "[" + string.Join(",", history) + "]";
-                                        await SendPacketToClientAsync(session, new Packet { Cmd = CommandType.SYNC_BOARD, Payload = Encoding.UTF8.GetBytes(historyJson) });
+                                        await SendHistoryToClientAsync(session, joinData.RoomCode, history);
                                         Logger.Info("TCP", $"[SYNC_BOARD] Gửi {history.Count} strokes cho '{session.Username}'");
                                     }
                                     else
@@ -288,17 +288,8 @@ namespace DrawingServer.Network
                             {
                                 var cursorData = PacketHelper.GetPayload<CursorPayload>(packet) ?? new CursorPayload();
                                 cursorData.Username = session.Username ?? "unknown";
+                                cursorData.RoomCode = session.RoomCode;
                                 packet = PacketHelper.Create(CommandType.CURSOR, cursorData);
-                                await BroadcastToRoomAsync(session.RoomCode, packet, excludeClientId: clientId);
-                            }
-                            break;
-
-                        case CommandType.LASER:
-                            if (!string.IsNullOrEmpty(session.RoomCode))
-                            {
-                                var laserData = PacketHelper.GetPayload<LaserPayload>(packet) ?? new LaserPayload();
-                                laserData.Username = session.Username ?? "unknown";
-                                packet = PacketHelper.Create(CommandType.LASER, laserData);
                                 await BroadcastToRoomAsync(session.RoomCode, packet, excludeClientId: clientId);
                             }
                             break;
@@ -347,7 +338,7 @@ namespace DrawingServer.Network
 
                                 await BroadcastToRoomAsync(session.RoomCode, packet, excludeClientId: clientId);
                                 if (!string.IsNullOrWhiteSpace(strokeJsonForSave))
-                                    _ = SaveStrokeFastPathAsync(roomCodeForSave, actionIdForSave, strokeJsonForSave, usernameForSave);
+                                    SaveStrokeFastPath(roomCodeForSave, actionIdForSave, strokeJsonForSave, usernameForSave);
                                 PublishCrossServerEvent(session.RoomCode, packet, session.Username ?? "");
 
                             }
@@ -366,7 +357,9 @@ namespace DrawingServer.Network
                                     stickerObj["ToolType"] = "Sticker";
                                     string actionId = stickerObj["ActionID"]?.ToString() ?? "";
                                     actionId = string.IsNullOrWhiteSpace(actionId) ? Guid.NewGuid().ToString() : actionId;
-                                    await DbManager.SaveStrokeAsync(session.RoomCode, actionId, stickerObj.ToString(), session.Username ?? "");
+                                    stickerObj["ActionID"] = actionId;
+                                    packet.Payload = Encoding.UTF8.GetBytes(stickerObj.ToString());
+                                    SaveStrokeFastPath(session.RoomCode, actionId, stickerObj.ToString(), session.Username ?? "");
                                 }
                                 catch { }
 
@@ -404,6 +397,13 @@ namespace DrawingServer.Network
                                 {
                                     var turnData = PacketHelper.GetPayload<TurnBasedPayload>(packet) ?? new TurnBasedPayload();
                                     var roomState = RoomService.GetRoomState(session.RoomCode);
+                                    if (roomState == null ||
+                                        !string.Equals(roomState.OwnerId, session.Username, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        Logger.Warning("TCP", $"[TURN_BASED] Bo qua SET_TURNBASED tu '{session.Username}': only room owner can toggle");
+                                        break;
+                                    }
+
                                     if (roomState != null)
                                     {
                                         roomState.IsTurnBasedEnabled = turnData.IsEnabled;
@@ -442,11 +442,6 @@ namespace DrawingServer.Network
                             }
                             break;
 
-                        case CommandType.CLAIM_AREA:
-                            if (!string.IsNullOrEmpty(session.RoomCode))
-                                await BroadcastToRoomAsync(session.RoomCode, packet, excludeClientId: clientId);
-                            break;
-
                         case CommandType.CLEAR_ALL:
                             if (!string.IsNullOrEmpty(session.RoomCode))
                             {
@@ -455,6 +450,7 @@ namespace DrawingServer.Network
                                 // Xóa lịch sử vẽ trong DB để người join sau không nhận history cũ
                                 try
                                 {
+                                    StrokePersistenceQueue.ClearRoom(session.RoomCode);
                                     await DbManager.ClearRoomHistoryAsync(session.RoomCode);
                                     await DbManager.ClearActionStackAsync(session.RoomCode);
                                 }
@@ -487,7 +483,9 @@ namespace DrawingServer.Network
                                     bgObj["ToolType"] = "SetBackground";
                                     string actionId = bgObj["ActionID"]?.ToString() ?? "";
                                     actionId = string.IsNullOrWhiteSpace(actionId) ? Guid.NewGuid().ToString() : actionId;
-                                    await DbManager.SaveStrokeAsync(session.RoomCode, actionId, bgObj.ToString(), session.Username ?? "");
+                                    bgObj["ActionID"] = actionId;
+                                    packet.Payload = Encoding.UTF8.GetBytes(bgObj.ToString());
+                                    SaveStrokeFastPath(session.RoomCode, actionId, bgObj.ToString(), session.Username ?? "");
                                 }
                                 catch { }
                                 await BroadcastToRoomAsync(session.RoomCode, packet, excludeClientId: clientId);
@@ -510,7 +508,7 @@ namespace DrawingServer.Network
                                     actionId = Guid.TryParse(actionId, out var parsedActionId) ? parsedActionId.ToString() : Guid.NewGuid().ToString();
                                     imgObj["ActionID"] = actionId;
                                     packet.Payload = Encoding.UTF8.GetBytes(imgObj.ToString());
-                                    await DbManager.SaveStrokeAsync(session.RoomCode, actionId, imgObj.ToString(), session.Username ?? "");
+                                    SaveStrokeFastPath(session.RoomCode, actionId, imgObj.ToString(), session.Username ?? "");
                                 }
                                 catch { }
                                 await BroadcastToRoomAsync(session.RoomCode, packet, excludeClientId: clientId);
@@ -685,45 +683,6 @@ namespace DrawingServer.Network
                             }
                             break;
 
-                        // ── SNAPSHOT + TIME TRAVEL (TCP) ────────────────────────────
-                        case CommandType.SNAPSHOT_LIST:
-                            // Client mở panel Snapshot → xin danh sách các mốc đã lưu
-                            if (!string.IsNullOrEmpty(session.RoomCode))
-                            {
-                                var snapshots = await DbManager.GetSnapshotListAsync(session.RoomCode);
-                                var snapPayload = new SharedLib.Payloads.SnapshotListPayload
-                                {
-                                    RoomCode  = session.RoomCode,
-                                    Snapshots = snapshots.Select(s => new SharedLib.Payloads.SnapshotInfo
-                                    {
-                                        SnapshotID      = s.Id,
-                                        Timestamp       = new DateTimeOffset(s.TakenAt).ToUnixTimeMilliseconds(),
-                                        ThumbnailBase64 = s.Thumbnail
-                                    }).ToList()
-                                };
-                                await SendPacketToClientAsync(session,
-                                    PacketHelper.Create(CommandType.SNAPSHOT_LIST, snapPayload));
-                                Logger.Info("TCP", $"[SNAP] Gửi {snapshots.Count} snapshot cho '{session.Username}'");
-                            }
-                            break;
-
-                        case CommandType.SNAPSHOT_RESTORE:
-                            // Client chọn 1 snapshot → server gửi lại toàn bộ strokes của snapshot đó
-                            var restoreReq = PacketHelper.GetPayload<SharedLib.Payloads.SnapshotRestorePayload>(packet);
-                            if (restoreReq != null && !string.IsNullOrEmpty(session.RoomCode))
-                            {
-                                string snapData = await DbManager.GetSnapshotDataAsync(restoreReq.SnapshotID);
-                                if (!string.IsNullOrEmpty(snapData))
-                                {
-                                    // Gửi lại như SYNC_BOARD để client replay
-                                    await SendPacketToClientAsync(session,
-                                        new Packet { Cmd = CommandType.SYNC_BOARD,
-                                                     Payload = Encoding.UTF8.GetBytes(snapData) });
-                                    Logger.Info("TCP", $"[SNAP] Restore snapshot #{restoreReq.SnapshotID} cho '{session.Username}'");
-                                }
-                            }
-                            break;
-
                         case CommandType.REQUEST_PLAYBACK:
                             // Client yêu cầu phát lại toàn bộ lịch sử vẽ của phòng
                             if (!string.IsNullOrEmpty(session.RoomCode))
@@ -798,7 +757,7 @@ namespace DrawingServer.Network
         // ✅ Gửi packet đến 1 client — dùng WriteLock để tránh race condition
         private async Task SendPacketToClientAsync(ClientSession client, Packet packet)
         {
-            if (client?.SecureStream == null) return;
+            if (client?.SecureStream == null || client.IsDisconnected) return;
             byte[] data = packet.Serialize();
             byte[] lenBytes = BitConverter.GetBytes(data.Length);
             if (BitConverter.IsLittleEndian) Array.Reverse(lenBytes);
@@ -812,7 +771,8 @@ namespace DrawingServer.Network
             }
             catch (Exception ex)
             {
-                Logger.Warning("TCP", $"Lỗi gửi đến {client.Username}: {ex.Message}");
+                client.IsDisconnected = true;
+                Logger.Warning("TCP", $"Loi gui den {client.Username}: {ex.Message}");
             }
             finally
             {
@@ -828,6 +788,8 @@ namespace DrawingServer.Network
             foreach (var kvp in Clients)
             {
                 ClientSession client = kvp.Value;
+                if (client.IsDisconnected)
+                    continue;
                 if (!string.Equals(client.RoomCode, roomCode, StringComparison.OrdinalIgnoreCase))
                     continue;
                 await SendPacketToClientStaticAsync(client, packet);
@@ -846,6 +808,8 @@ namespace DrawingServer.Network
             foreach (var kvp in Clients)
             {
                 ClientSession client = kvp.Value;
+                if (client.IsDisconnected)
+                    continue;
                 if (!string.Equals(client.RoomCode, roomCode, StringComparison.OrdinalIgnoreCase))
                     continue;
                 if (client.UdpEndPoint != null)
@@ -863,7 +827,7 @@ namespace DrawingServer.Network
 
         private static async Task SendPacketToClientStaticAsync(ClientSession client, Packet packet)
         {
-            if (client?.SecureStream == null)
+            if (client?.SecureStream == null || client.IsDisconnected)
                 return;
 
             byte[] data = packet.Serialize();
@@ -877,7 +841,7 @@ namespace DrawingServer.Network
                 await client.SecureStream.WriteAsync(data, 0, data.Length);
                 await client.SecureStream.FlushAsync();
             }
-            catch { }
+            catch { client.IsDisconnected = true; }
             finally
             {
                 client.WriteLock.Release();
@@ -888,23 +852,28 @@ namespace DrawingServer.Network
         {
             if (string.IsNullOrWhiteSpace(roomCode) || packet == null)
                 return;
+            if (packet.Cmd == CommandType.DRAW ||
+                packet.Cmd == CommandType.FLOOD_FILL ||
+                packet.Cmd == CommandType.TEXT ||
+                packet.Cmd == CommandType.SPRAY)
+                return;
             _ = CrossServerSyncService.PublishEventAsync(roomCode, packet, username ?? "");
         }
 
         // ✅ Broadcast đến tất cả client trong phòng — mỗi client dùng WriteLock riêng
-        private static async Task SaveStrokeFastPathAsync(string roomCode, string actionId, string strokeJson, string username)
+        private static void SaveStrokeFastPath(string roomCode, string actionId, string strokeJson, string username)
         {
             try
             {
-                await DbManager.SaveStrokeAsync(roomCode, actionId, strokeJson, username ?? "");
+                StrokePersistenceQueue.Enqueue(roomCode, actionId, strokeJson, username ?? "");
             }
             catch (Exception ex)
             {
-                Logger.Warning("TCP", $"[DRAW TCP] Luu nen that bai: {ex.Message}");
+                Logger.Warning("TCP", $"[DRAW TCP] Khong enqueue duoc stroke: {ex.Message}");
             }
         }
 
-        private static async Task SaveAiImageStrokeAsync(
+        private static void SaveAiImageStroke(
             string roomCode,
             string actionId,
             string username,
@@ -934,7 +903,7 @@ namespace DrawingServer.Network
                 ["Timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             };
 
-            await DbManager.SaveStrokeAsync(roomCode, safeActionId, imageObj.ToString(), username ?? "");
+            SaveStrokeFastPath(roomCode, safeActionId, imageObj.ToString(), username ?? "");
         }
 
         private static void PersistAiImageInBackground(
@@ -964,7 +933,7 @@ namespace DrawingServer.Network
                         provider: provider ?? "",
                         model: model ?? "");
 
-                    await SaveAiImageStrokeAsync(
+                    SaveAiImageStroke(
                         roomCode,
                         actionId,
                         username ?? "",
@@ -1004,12 +973,56 @@ namespace DrawingServer.Network
             }
         }
 
+        private async Task SendHistoryToClientAsync(ClientSession session, string roomCode, List<string> history)
+        {
+            const int MaxChunkBytes = 512 * 1024;
+            var chunks = new List<List<string>>();
+            var current = new List<string>();
+            int currentBytes = 0;
+
+            foreach (string rawAction in history)
+            {
+                string safeAction = string.IsNullOrWhiteSpace(rawAction) ? "{}" : rawAction;
+                int actionBytes = Encoding.UTF8.GetByteCount(safeAction) + 2;
+                if (current.Count > 0 && currentBytes + actionBytes > MaxChunkBytes)
+                {
+                    chunks.Add(current);
+                    current = new List<string>();
+                    currentBytes = 0;
+                }
+
+                current.Add(safeAction);
+                currentBytes += actionBytes;
+            }
+
+            if (current.Count > 0)
+                chunks.Add(current);
+
+            int totalChunks = Math.Max(1, chunks.Count);
+            for (int i = 0; i < chunks.Count; i++)
+            {
+                var payload = new SyncBoardPayload
+                {
+                    RoomCode = roomCode,
+                    RawActions = chunks[i],
+                    IsChunked = totalChunks > 1,
+                    ChunkIndex = i,
+                    TotalChunks = totalChunks,
+                    IsFinalChunk = i == chunks.Count - 1
+                };
+
+                await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.SYNC_BOARD, payload));
+            }
+        }
+
         private async Task BroadcastToRoomAsync(string roomCode, Packet packet, string excludeClientId = "")
         {
             int count = 0;
             foreach (var kvp in Clients)
             {
                 ClientSession client = kvp.Value;
+                if (client.IsDisconnected)
+                    continue;
                 if (client.RoomCode != roomCode) continue;
                 if (!string.IsNullOrEmpty(excludeClientId) && kvp.Key == excludeClientId) continue;
                 await SendPacketToClientAsync(client, packet);

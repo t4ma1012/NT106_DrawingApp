@@ -3,6 +3,7 @@ using System.IO;
 using System.Net.Sockets;
 using System.Threading;
 using System.Text;
+using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Linq;
 using SharedLib.Packets;
@@ -37,6 +38,7 @@ namespace DrawingClient.Network
         public bool PreferTcpRealtime { get; set; }
         public string AssignedServerId { get; private set; } = "";
         public bool IsConnected => _tcpClient?.Connected ?? false;
+        private int ConnectTimeoutMs => Math.Max(1000, EnvLoader.GetInt("CLIENT_CONNECT_TIMEOUT_MS", 6000));
 
         public void SetAssignedServer(string serverIp, int tcpPort, int udpPort, string serverId = "")
         {
@@ -56,12 +58,12 @@ namespace DrawingClient.Network
                 ServerTcpPort = port;
                 _tcpClient = new TcpClient();
                 _tcpClient.NoDelay = true;
-                _tcpClient.Connect(ServerIp, port);
+                ConnectTcpWithTimeout(_tcpClient, ServerIp, port, ConnectTimeoutMs);
 
                 if (useSSL)
                 {
                     var ssl = new SslStream(_tcpClient.GetStream(), false, (s, cert, chain, err) => true);
-                    ssl.AuthenticateAsClient("DrawingServer", null, SslProtocols.Tls12, false);
+                    AuthenticateSslWithTimeout(ssl, ConnectTimeoutMs);
                     _stream = ssl;
                     Logger.Info("ClientNetwork", "Kết nối SSL thành công.");
                 }
@@ -85,6 +87,8 @@ namespace DrawingClient.Network
             }
             catch (Exception ex)
             {
+                try { _stream?.Close(); } catch { }
+                try { _tcpClient?.Close(); } catch { }
                 Logger.Error("ClientNetwork", $"Lỗi kết nối: {ex.Message}");
                 return false;
             }
@@ -100,7 +104,7 @@ namespace DrawingClient.Network
 
                 _tcpClient = new TcpClient();
                 _tcpClient.NoDelay = true;
-                _tcpClient.Connect(ServerIp, lbPort);
+                ConnectTcpWithTimeout(_tcpClient, ServerIp, lbPort, ConnectTimeoutMs);
 
                 var rawStream = _tcpClient.GetStream();
                 if (!string.IsNullOrWhiteSpace(serverId))
@@ -111,7 +115,7 @@ namespace DrawingClient.Network
                 }
 
                 var ssl = new SslStream(rawStream, false, (s, cert, chain, err) => true);
-                ssl.AuthenticateAsClient("DrawingServer", null, SslProtocols.Tls12, false);
+                AuthenticateSslWithTimeout(ssl, ConnectTimeoutMs);
                 _stream = ssl;
                 Logger.Info("ClientNetwork", $"Kết nối LB relay thành công. target={serverId}");
 
@@ -129,9 +133,31 @@ namespace DrawingClient.Network
             }
             catch (Exception ex)
             {
+                try { _stream?.Close(); } catch { }
+                try { _tcpClient?.Close(); } catch { }
                 Logger.Error("ClientNetwork", $"Lỗi kết nối relay: {ex.Message}");
                 return false;
             }
+        }
+
+        private static void ConnectTcpWithTimeout(TcpClient tcp, string host, int port, int timeoutMs)
+        {
+            Task connectTask = tcp.ConnectAsync(host, port);
+            if (!connectTask.Wait(timeoutMs) || !tcp.Connected)
+                throw new TimeoutException($"Timeout connecting to {host}:{port}.");
+
+            if (connectTask.IsFaulted && connectTask.Exception != null)
+                throw connectTask.Exception.GetBaseException();
+        }
+
+        private static void AuthenticateSslWithTimeout(SslStream ssl, int timeoutMs)
+        {
+            Task authTask = ssl.AuthenticateAsClientAsync("DrawingServer", null, SslProtocols.Tls12, false);
+            if (!authTask.Wait(timeoutMs) || !ssl.IsAuthenticated)
+                throw new TimeoutException("Timeout during TLS handshake.");
+
+            if (authTask.IsFaulted && authTask.Exception != null)
+                throw authTask.Exception.GetBaseException();
         }
 
         public async System.Threading.Tasks.Task<bool> ReconnectToRoomOwnerViaLoadBalancerAsync(string roomCode)
@@ -159,7 +185,7 @@ namespace DrawingClient.Network
             catch (Exception ex)
             {
                 Logger.Warning("ClientNetwork", $"Không resolve được room route {roomCode}: {ex.Message}");
-                return true;
+                return false;
             }
 
             if (string.IsNullOrWhiteSpace(route.ServerId) ||
@@ -177,8 +203,10 @@ namespace DrawingClient.Network
             };
 
             Disconnect();
-            PreferTcpRealtime = true;
-            SetAssignedServer(lbHost, lbPort, route.UdpPort, route.ServerId);
+            bool useLbUdpProxy = EnvLoader.Get("LOAD_BALANCER_UDP_PROXY", "0") == "1";
+            int lbUdpPort = EnvLoader.GetInt("LOAD_BALANCER_UDP_PORT", 9001);
+            PreferTcpRealtime = !useLbUdpProxy;
+            SetAssignedServer(lbHost, lbPort, lbUdpPort, route.ServerId);
 
             if (!ConnectRelay(lbHost, lbPort, route.ServerId))
             {
@@ -292,7 +320,6 @@ namespace DrawingClient.Network
         public void SendRedo(string actionId) => Send(CommandType.REDO, new RedoPayload { ActionID = actionId, Username = CurrentUsername });
         public void SendChat(string message, int colorArgb = 0) => Send(CommandType.CHAT, new ChatPayload { Username = CurrentUsername, ColorARGB = colorArgb, Message = message, Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
         public void SendCursorRealtime(CursorPayload payload) => Send(CommandType.CURSOR, payload);
-        public void SendLaserRealtime(LaserPayload payload) => Send(CommandType.LASER, payload);
         public void SendDrawRealtime(DrawPayload payload) => Send(CommandType.DRAW, payload);
         public void SendFloodFillRealtime(FloodFillPayload payload) => Send(CommandType.FLOOD_FILL, payload);
         public void SendTextRealtime(DrawPayload payload) => Send(CommandType.TEXT, payload);
@@ -316,7 +343,7 @@ namespace DrawingClient.Network
                     if (BitConverter.IsLittleEndian) Array.Reverse(lenBuf);
 
                     int packetLen = BitConverter.ToInt32(lenBuf, 0);
-                    if (packetLen <= 0 || packetLen > 5000000) break; // Chặn rác tránh tràn RAM
+                    if (packetLen <= 0 || packetLen > 50 * 1024 * 1024) break; // Chặn rác tránh tràn RAM
 
                     byte[] packetBuf = new byte[packetLen];
                     ReadExact(packetBuf, packetLen);
@@ -383,105 +410,7 @@ namespace DrawingClient.Network
 
                     // FIX LỖI ĐỒNG BỘ MẠNH NHẤT TẠI ĐÂY (SYNC_BOARD)
                     case CommandType.SYNC_BOARD:
-                        string jsonSync = Encoding.UTF8.GetString(p.Payload);
-                        if (jsonSync.TrimStart().StartsWith("["))
-                        {
-                            try
-                            {
-                                // Parse từng item theo ToolType để xử lý đúng format
-                                var rawItems = JsonConvert.DeserializeObject<List<Newtonsoft.Json.Linq.JObject>>(jsonSync);
-                                if (rawItems != null && rawItems.Count > 0)
-                                {
-                                    var actions = new System.Collections.Generic.List<DrawAction>();
-                                    foreach (var item in rawItems)
-                                    {
-                                        string toolType = item["ToolType"]?.ToString() ?? item["toolType"]?.ToString() ?? "";
-
-                                        if (toolType.Equals("SetBackground", StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            actions.Add(new DrawAction
-                                            {
-                                                ActionID  = item["ActionID"]?.ToString() ?? item["actionId"]?.ToString() ?? "",
-                                                Username  = item["Username"]?.ToString() ?? item["username"]?.ToString() ?? "",
-                                                ToolType  = "SetBackground",
-                                                ColorARGB = item["ColorARGB"]?.ToObject<int>() ?? 0,
-                                                ImageData = item["ImageData"]?.ToString() ?? "",
-                                                Timestamp = item["Timestamp"]?.ToObject<long>() ?? 0
-                                            });
-                                        }
-                                        else if (toolType.Equals("ImportImage", StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            // ImportImagePayload dùng X/Y, map sang X1/Y1
-                                            actions.Add(new DrawAction
-                                            {
-                                                ActionID    = item["ActionID"]?.ToString() ?? item["actionId"]?.ToString() ?? "",
-                                                Username    = item["Username"]?.ToString() ?? item["username"]?.ToString() ?? "",
-                                                ToolType    = "ImportImage",
-                                                X1          = item["X"]?.ToObject<int>() ?? item["X1"]?.ToObject<int>() ?? 0,
-                                                Y1          = item["Y"]?.ToObject<int>() ?? item["Y1"]?.ToObject<int>() ?? 0,
-                                                ImageWidth  = item["Width"]?.ToObject<int>() ?? 400,
-                                                ImageHeight = item["Height"]?.ToObject<int>() ?? 300,
-                                                ImageData   = item["ImageData"]?.ToString() ?? "",
-                                                IsDeleted   = item["IsDeleted"]?.ToObject<bool>() ?? false,
-                                                Timestamp   = item["Timestamp"]?.ToObject<long>() ?? 0
-                                            });
-                                        }
-                                        else if (toolType.Equals("Sticker", StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            // StickerPayload: StickerID map sang Text, X/Y map sang X1/Y1
-                                            actions.Add(new DrawAction
-                                            {
-                                                ActionID    = item["ActionID"]?.ToString() ?? item["actionId"]?.ToString() ?? "",
-                                                Username    = item["Username"]?.ToString() ?? item["username"]?.ToString() ?? "",
-                                                ToolType    = "Sticker",
-                                                Text        = item["StickerID"]?.ToString() ?? "",
-                                                X1          = item["X"]?.ToObject<int>() ?? 0,
-                                                Y1          = item["Y"]?.ToObject<int>() ?? 0,
-                                                ImageWidth  = item["Width"]?.ToObject<int>() ?? 64,
-                                                ImageHeight = item["Height"]?.ToObject<int>() ?? 64,
-                                                IsDeleted   = item["IsDeleted"]?.ToObject<bool>() ?? false,
-                                                Timestamp   = item["Timestamp"]?.ToObject<long>() ?? 0
-                                            });
-                                        }
-                                        else
-                                        {
-                                            // DrawPayload thông thường (Pen, Line, FloodFill, Text, Spray...)
-                                            var dp = item.ToObject<DrawPayload>();
-                                            if (dp != null)
-                                            {
-                                                actions.Add(new DrawAction
-                                                {
-                                                    ActionID  = dp.ActionID,
-                                                    Username  = dp.Username,
-                                                    ToolType  = dp.ToolType,
-                                                    X1        = dp.X1,
-                                                    Y1        = dp.Y1,
-                                                    X2        = dp.X2,
-                                                    Y2        = dp.Y2,
-                                                    ColorARGB = dp.ColorARGB,
-                                                    Thickness = dp.Thickness,
-                                                    Text      = dp.Text,
-                                                    FontName  = dp.FontName,
-                                                    FontSize  = dp.FontSize,
-                                                    IsDeleted = dp.IsDeleted,
-                                                    Timestamp = dp.Timestamp
-                                                });
-                                            }
-                                        }
-                                    }
-                                    NetworkEvents.RaiseSyncBoardReceived(new SyncBoardPayload { Actions = actions });
-                                    break;
-                                }
-                            }
-                            catch { }
-                            // Fallback: deserialize thành DrawAction (format cũ)
-                            var fallbackActions = JsonConvert.DeserializeObject<List<DrawAction>>(jsonSync);
-                            NetworkEvents.RaiseSyncBoardReceived(new SyncBoardPayload { Actions = fallbackActions });
-                        }
-                        else
-                        {
-                            NetworkEvents.RaiseSyncBoardReceived(PacketHelper.GetPayload<SyncBoardPayload>(p));
-                        }
+                        NetworkEvents.RaiseSyncBoardReceived(ParseSyncBoardPacket(p));
                         break;
 
                     case CommandType.UNDO:
@@ -509,9 +438,6 @@ namespace DrawingClient.Network
                         break;
                     case CommandType.CURSOR:
                         NetworkEvents.RaiseCursorReceived(PacketHelper.GetPayload<CursorPayload>(p));
-                        break;
-                    case CommandType.LASER:
-                        NetworkEvents.RaiseLaserReceived(PacketHelper.GetPayload<LaserPayload>(p));
                         break;
                     case CommandType.STICKER:
                         NetworkEvents.RaiseStickerReceived(PacketHelper.GetPayload<StickerPayload>(p));
@@ -551,6 +477,160 @@ namespace DrawingClient.Network
             {
                 Logger.Warning("ClientNetwork", $"Lỗi bỏ qua khi xử lý lệnh {p.Cmd}: {ex.Message}");
             }
+        }
+
+        private SyncBoardPayload ParseSyncBoardPacket(Packet packet)
+        {
+            string jsonSync = Encoding.UTF8.GetString(packet.Payload ?? Array.Empty<byte>());
+            if (jsonSync.TrimStart().StartsWith("["))
+            {
+                return new SyncBoardPayload { Actions = ParseRawActions(jsonSync) };
+            }
+
+            var payload = PacketHelper.GetPayload<SyncBoardPayload>(packet) ?? new SyncBoardPayload();
+            if (payload.RawActions != null && payload.RawActions.Count > 0)
+            {
+                payload.Actions = new List<DrawAction>();
+                foreach (string rawAction in payload.RawActions)
+                {
+                    var action = ParseRawAction(rawAction);
+                    if (action != null)
+                        payload.Actions.Add(action);
+                }
+            }
+
+            return payload;
+        }
+
+        private List<DrawAction> ParseRawActions(string jsonArray)
+        {
+            var actions = new List<DrawAction>();
+            try
+            {
+                var rawItems = JsonConvert.DeserializeObject<List<Newtonsoft.Json.Linq.JObject>>(jsonArray);
+                if (rawItems != null)
+                {
+                    foreach (var item in rawItems)
+                    {
+                        var action = ParseRawAction(item);
+                        if (action != null)
+                            actions.Add(action);
+                    }
+                }
+            }
+            catch
+            {
+                var fallbackActions = JsonConvert.DeserializeObject<List<DrawAction>>(jsonArray);
+                if (fallbackActions != null)
+                    actions.AddRange(fallbackActions);
+            }
+
+            return actions;
+        }
+
+        private DrawAction ParseRawAction(string rawAction)
+        {
+            if (string.IsNullOrWhiteSpace(rawAction))
+                return null;
+
+            try
+            {
+                return ParseRawAction(Newtonsoft.Json.Linq.JObject.Parse(rawAction));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private DrawAction ParseRawAction(Newtonsoft.Json.Linq.JObject item)
+        {
+            if (item == null)
+                return null;
+
+            string toolType = item["ToolType"]?.ToString() ?? item["toolType"]?.ToString() ?? "";
+            if (toolType.Equals("SetBackground", StringComparison.OrdinalIgnoreCase))
+            {
+                return new DrawAction
+                {
+                    ActionID = item["ActionID"]?.ToString() ?? item["actionId"]?.ToString() ?? "",
+                    Username = item["Username"]?.ToString() ?? item["username"]?.ToString() ?? "",
+                    ToolType = "SetBackground",
+                    ColorARGB = item["ColorARGB"]?.ToObject<int>() ?? 0,
+                    ImageData = item["ImageData"]?.ToString() ?? "",
+                    Timestamp = item["Timestamp"]?.ToObject<long>() ?? 0
+                };
+            }
+
+            if (toolType.Equals("ImportImage", StringComparison.OrdinalIgnoreCase))
+            {
+                return new DrawAction
+                {
+                    ActionID = item["ActionID"]?.ToString() ?? item["actionId"]?.ToString() ?? "",
+                    Username = item["Username"]?.ToString() ?? item["username"]?.ToString() ?? "",
+                    ToolType = "ImportImage",
+                    X1 = item["X"]?.ToObject<int>() ?? item["X1"]?.ToObject<int>() ?? 0,
+                    Y1 = item["Y"]?.ToObject<int>() ?? item["Y1"]?.ToObject<int>() ?? 0,
+                    ImageWidth = item["Width"]?.ToObject<int>() ?? 400,
+                    ImageHeight = item["Height"]?.ToObject<int>() ?? 300,
+                    ImageData = item["ImageData"]?.ToString() ?? "",
+                    IsDeleted = item["IsDeleted"]?.ToObject<bool>() ?? false,
+                    Timestamp = item["Timestamp"]?.ToObject<long>() ?? 0
+                };
+            }
+
+            if (toolType.Equals("Sticker", StringComparison.OrdinalIgnoreCase))
+            {
+                return new DrawAction
+                {
+                    ActionID = item["ActionID"]?.ToString() ?? item["actionId"]?.ToString() ?? "",
+                    Username = item["Username"]?.ToString() ?? item["username"]?.ToString() ?? "",
+                    ToolType = "Sticker",
+                    Text = item["StickerID"]?.ToString() ?? item["Text"]?.ToString() ?? "",
+                    X1 = item["X"]?.ToObject<int>() ?? item["X1"]?.ToObject<int>() ?? 0,
+                    Y1 = item["Y"]?.ToObject<int>() ?? item["Y1"]?.ToObject<int>() ?? 0,
+                    ImageWidth = item["Width"]?.ToObject<int>() ?? item["ImageWidth"]?.ToObject<int>() ?? 64,
+                    ImageHeight = item["Height"]?.ToObject<int>() ?? item["ImageHeight"]?.ToObject<int>() ?? 64,
+                    IsDeleted = item["IsDeleted"]?.ToObject<bool>() ?? false,
+                    Timestamp = item["Timestamp"]?.ToObject<long>() ?? 0
+                };
+            }
+
+            if (toolType.Equals("FloodFill", StringComparison.OrdinalIgnoreCase))
+            {
+                return new DrawAction
+                {
+                    ActionID = item["ActionID"]?.ToString() ?? item["actionId"]?.ToString() ?? "",
+                    Username = item["Username"]?.ToString() ?? item["username"]?.ToString() ?? "",
+                    ToolType = "FloodFill",
+                    X1 = item["X"]?.ToObject<int>() ?? item["X1"]?.ToObject<int>() ?? 0,
+                    Y1 = item["Y"]?.ToObject<int>() ?? item["Y1"]?.ToObject<int>() ?? 0,
+                    ColorARGB = item["ColorARGB"]?.ToObject<int>() ?? 0,
+                    Timestamp = item["Timestamp"]?.ToObject<long>() ?? 0
+                };
+            }
+
+            var dp = item.ToObject<DrawPayload>();
+            if (dp == null)
+                return null;
+
+            return new DrawAction
+            {
+                ActionID = dp.ActionID,
+                Username = dp.Username,
+                ToolType = dp.ToolType,
+                X1 = dp.X1,
+                Y1 = dp.Y1,
+                X2 = dp.X2,
+                Y2 = dp.Y2,
+                ColorARGB = dp.ColorARGB,
+                Thickness = dp.Thickness,
+                Text = dp.Text,
+                FontName = dp.FontName,
+                FontSize = dp.FontSize,
+                IsDeleted = dp.IsDeleted,
+                Timestamp = dp.Timestamp
+            };
         }
     }
 }

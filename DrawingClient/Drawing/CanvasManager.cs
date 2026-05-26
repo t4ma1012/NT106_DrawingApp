@@ -64,11 +64,7 @@ namespace DrawingClient.Drawing
         private bool isDrawing;
         private bool isPanning;
         private Point lastPanPoint;
-        private bool isClaimSelecting;
-        private Point claimStart;
-        private Point claimEnd;
         private readonly Dictionary<string, Point> remoteCursors = new Dictionary<string, Point>();
-        private readonly Dictionary<string, Point> remoteLasers = new Dictionary<string, Point>();
         private readonly object cursorLock = new object();
         private readonly List<StickerPayload> stickers = new List<StickerPayload>();
         private readonly Dictionary<string, int> stickerIndexById = new Dictionary<string, int>();
@@ -109,7 +105,6 @@ namespace DrawingClient.Drawing
         public Action<DrawPayload> OnNetworkTextAction;
         public Action<ImportImagePayload> OnNetworkImportImageAction;
         public Action<StickerPayload> OnNetworkStickerAction;
-        public Action<Rectangle> OnClaimAreaSelected;
         public bool HasSelectedObject => activeObjectKind != InteractiveObjectKind.None && !string.IsNullOrWhiteSpace(activeObjectId);
 
         public CanvasManager(PictureBox pictureBox)
@@ -779,30 +774,12 @@ namespace DrawingClient.Drawing
             canvas.Invalidate();
         }
 
-        public void UpdateRemoteLaser(string username, Point point)
-        {
-            if (string.IsNullOrWhiteSpace(username)) return;
-            lock (cursorLock) { remoteLasers[username] = point; }
-            canvas.Invalidate();
-        }
-
         public void RemoveRemoteCursor(string username)
         {
             if (string.IsNullOrWhiteSpace(username)) return;
             lock (cursorLock)
             {
                 if (remoteCursors.ContainsKey(username)) remoteCursors.Remove(username);
-                if (remoteLasers.ContainsKey(username)) remoteLasers.Remove(username);
-            }
-            canvas.Invalidate();
-        }
-
-        public void RemoveRemoteLaser(string username)
-        {
-            if (string.IsNullOrWhiteSpace(username)) return;
-            lock (cursorLock)
-            {
-                if (remoteLasers.ContainsKey(username)) remoteLasers.Remove(username);
             }
             canvas.Invalidate();
         }
@@ -839,32 +816,8 @@ namespace DrawingClient.Drawing
                     }
                 }
 
-                if (isClaimSelecting)
-                {
-                    Rectangle claimRect = BuildRectangle(claimStart, claimEnd);
-                    using (Brush fill = new SolidBrush(Color.FromArgb(45, Color.DeepSkyBlue)))
-                    using (Pen border = new Pen(Color.FromArgb(170, Color.DeepSkyBlue), 1.5f))
-                    {
-                        border.DashStyle = DashStyle.Dash;
-                        e.Graphics.FillRectangle(fill, claimRect);
-                        e.Graphics.DrawRectangle(border, claimRect);
-                    }
-                }
-
                 lock (cursorLock)
                 {
-                    foreach (var laser in remoteLasers)
-                    {
-                        using (Brush glow = new SolidBrush(Color.FromArgb(70, Color.Red)))
-                        using (Brush core = new SolidBrush(Color.FromArgb(230, Color.Red)))
-                        using (Pen ring = new Pen(Color.FromArgb(210, Color.White), 1.5f))
-                        {
-                            e.Graphics.FillEllipse(glow, laser.Value.X - 12, laser.Value.Y - 12, 24, 24);
-                            e.Graphics.FillEllipse(core, laser.Value.X - 5, laser.Value.Y - 5, 10, 10);
-                            e.Graphics.DrawEllipse(ring, laser.Value.X - 7, laser.Value.Y - 7, 14, 14);
-                        }
-                    }
-
                     foreach (var cursor in remoteCursors)
                     {
                         using (Brush b = new SolidBrush(Color.FromArgb(180, Color.MediumPurple)))
@@ -1022,12 +975,6 @@ namespace DrawingClient.Drawing
                 try { UndoHistory?.Push(drawingSurface); } catch { }
             }
 
-            if (e.Button == MouseButtons.Right && (Control.ModifierKeys & Keys.Shift) == Keys.Shift)
-            {
-                isClaimSelecting = true;
-                claimStart = ScreenToCanvas(e.Location);
-                claimEnd = claimStart;
-            }
         }
 
         private void Canvas_MouseMove(object sender, MouseEventArgs e)
@@ -1081,11 +1028,6 @@ namespace DrawingClient.Drawing
                 canvas.Invalidate();
             }
 
-            if (isClaimSelecting)
-            {
-                claimEnd = actualPoint;
-                canvas.Invalidate();
-            }
         }
 
         private void UpdateMouseToolCursor(Point canvasPoint)
@@ -1142,14 +1084,6 @@ namespace DrawingClient.Drawing
             isDrawing = false;
             activeDrawingActionId = null;
 
-            if (e.Button == MouseButtons.Right && isClaimSelecting)
-            {
-                isClaimSelecting = false;
-                Rectangle rect = BuildRectangle(claimStart, claimEnd);
-                if (rect.Width > 2 && rect.Height > 2)
-                    OnClaimAreaSelected?.Invoke(rect);
-                canvas.Invalidate();
-            }
         }
 
         private bool TryStartObjectManipulation(Point canvasPoint)

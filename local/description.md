@@ -1,8 +1,8 @@
-# NT106 Drawing App - tri thuc tong quan du an
+﻿# NT106 Drawing App - tri thuc tong quan du an
 
 Trang thai: `ACTIVE`
 
-File nay la entrypoint boi canh cho cac phien lam viec sau. Neu can nam du an nhanh, doc file nay truoc; cac file chi tiet nam trong `local/plan`, `local/done`, `local/setup` va code theo duong dan ben duoi.
+File nay la entrypoint boi canh cho cac phien lam viec sau. Neu can nam du an nhanh, doc file nay truoc; cac file chi tiet nam trong `local/plan`, `local/done`, `setup` va code theo duong dan ben duoi.
 
 ## Muc tieu va kien truc
 
@@ -23,17 +23,38 @@ Demo ha tang da chot:
 
 ## Trang thai moi nhat
 
-- Build/test gan nhat 2026-05-25 sau khi them `role-setup/`, don schema Neon va sua direct UDP port cho playit: `dotnet build .\NT106_DrawingApp.sln -v:minimal -p:OutputPath=..\local\tmp_build\Solution\` pass 0 warning; `dotnet test .\NT106Tests\NT106Tests.csproj -v:minimal -p:OutputPath=..\local\tmp_build\Tests\` pass 17, skip 1 (`TcpConcurrentConnections_10Clients` can server dang chay), total 18. Build output mac dinh co the bi khoa neu dang chay `DrawingClient`/`LoadBalancer`/`DrawingServer`; khi app dang mo nen build vao output tam trong `local\tmp_build`.
-- Cap nhat 2026-05-25: da audit Neon cloud bang helper Npgsql. Truoc khi don, schema co cac bang rong/khong con code dung: `clientratelimits`, `gifexports`, `roommembers`, `stickers`, `stickynotes`, `stickynotereplies`. Da them va apply migration `004_drop_unused_tables.sql`; schema cloud con cac bang active: `users`, `rooms`, `drawhistory`, `chathistory`, `gallery`, `actionstack`, `airesults`, `snapshots`, `pixelartcells`, `servernodes`, `roomevents`.
-- Cap nhat 2026-05-25: da them thu muc `role-setup/` de moi role chay script rieng: `start-server.ps1`, `start-load-balancer.ps1`, `start-client.ps1`, `start-local-all.ps1`, kem `README.md`. Thu muc nay la goi setup cho client/LB/server tai ve va chay theo kich ban. `LoadBalancer/servers.json` la file runtime generated va da dua vao `.gitignore`; dung `servers.example.json` hoac script de tao lai.
-- Cap nhat 2026-05-25: da bo sung `local/plan/12_kich_ban_demo_playit.md` va `local/plan/13_cau_hoi_dua_du_an_vao_thuc_te.md`. Kich ban playit tach ro internet direct TCP+UDP (giu dung UDP cho cursor/laser) voi internet qua LoadBalancer relay (TCP-only relay, cursor/laser fallback TCP vi LB hien chua proxy UDP).
-- Cap nhat 2026-05-25: client direct mode da doc `SERVER_UDP_PORT` truoc khi connect, nen khi playit cap public TCP/UDP port khac nhau co the chay `start-client.ps1 -Mode Direct -Host <playit-host> -TcpPort <tcp> -UdpPort <udp>` de UDP/AES cursor/laser di dung endpoint.
-- Canvas da chot co dinh 1920x1080 tren client va room; canvas nay tu cover vung nhin thay o muc zoom-out toi da (khong lo khoang chet), khong con combobox chon kich thuoc trong sidebar. Zoom la local, dung `Ctrl + MouseWheel`, `Ctrl +` va `Ctrl -`; co tool `Chuột` de pan viewport bang cach giu chuot trai keo, va khung ben phai co the an/hien tu thanh cong cu trai de mo rong vung ve.
+- Cap nhat 2026-05-26: sua loi chat khong tu xuong dong khi tin nhan dai trong `MainForm`. Vung hien thi chat da doi tu `ListBox` sang `RichTextBox` read-only co `WordWrap=true`, tu dong cuon ve cuoi khi co tin moi; chi doi UI hien thi, khong doi logic gui/nhan chat qua network.
+- Cap nhat 2026-05-26: fix dong bo net ve khi DB het connection slot (`53300`). Server khong con mo connection DB rieng cho tung packet ve tren critical path; `SecureTcpServer`/`SecureUdpServer` dua draw/flood/text/spray/sticker/background/import/AI image vao `StrokePersistenceQueue`, queue luu tuan tu co retry/backoff va giu pending stroke theo room trong RAM. `DbManager.GetRoomHistoryAsync` ghep them pending stroke chua kip flush DB, nen user vao phong sau van nhan du history hien co trong runtime. `CLEAR_ALL` goi `StrokePersistenceQueue.ClearRoom` de chan cac stroke cu dang queue bi save lai sau khi xoa. `CrossServerSyncService.PublishEventAsync` duoc serialize bang semaphore va `PublishCrossServerEvent` bo qua draw/flood/text/spray tan suat cao de tranh tao connection storm qua PostgreSQL notify. Luu y: khong tu chen `Max Pool Size` vao connection string vi Npgsql ban runtime bao `Couldn't set max pool size`; `PostgresConnectionString.Normalize` chi them `Timeout=15` neu env chua cau hinh.
+- Cap nhat 2026-05-26: fix client moi vao phong co history lon nhung canvas trang/bi ngat ket noi. Server `SecureTcpServer` khong con gui toan bo `DrawHistory` trong mot packet raw JSON duy nhat; `SendHistoryToClientAsync` chia `SYNC_BOARD` thanh chunk nho qua `SyncBoardPayload.RawActions` + metadata chunk. Client `ClientNetwork` parse RawActions thanh `DrawAction`, `MainForm` gom cac chunk vao `actionHistory` va chi render khi chunk cuoi den. Gioi han packet TCP client/server tang len 50MB de action anh don le khong lam client tu dong disconnect. `ClientSession.IsDisconnected` duoc danh dau khi write fail de broadcast bo qua session chet, giam spam log `forcibly closed`.
+- Cap nhat 2026-05-26: gia co room-affinity cua LoadBalancer. Khi client route vao room cu, LB bat buoc lay dung `Rooms.owner_server_id` hoac cache owner da biet; neu khong lookup duoc owner/owner unhealthy thi tra loi loi thay vi fallback sang server bat ky. Client `ReconnectToRoomOwnerViaLoadBalancerAsync` nay fail join khi khong resolve duoc owner, tranh chia cung mot room sang 2 backend lam mat dong bo. Da build/test pass va `setup/package-release.ps1` cap nhat lai `setup/apps` + `NT106-DrawingApp-setup.zip`.
+- Cap nhat 2026-05-26: fix kich ban `setup/start-local-no-lb.ps1` de demo 1 server local khong LB on dinh hon. Script nay bay gio doi server san sang bang TLS handshake that (`Wait-SetupTlsPort`) thay vi TCP socket tho, tranh tao log nhieu dong `Authentication failed because the remote party has closed the transport stream`. Khi mo client trong kich ban local-no-lb, script ep ro `USE_LOAD_BALANCER_ROUTING=0`, `LOAD_BALANCER_CLIENT_MODE=direct`, `SERVER_PUBLIC_HOST=127.0.0.1`, `SERVER_TCP_PORT=8888`, `SERVER_UDP_PORT=8889`, `LOAD_BALANCER_UDP_PROXY=0`, `CLIENT_FORCE_TCP_REALTIME=0`, va truyen `CLIENT_CONNECT_TIMEOUT_MS` tu `.env`/mac dinh 6000. Da smoke test: `start-local-no-lb.ps1 -ClientCount 0 -StopExisting` bao `server-1 san sang TLS`, helper `local/tmp_local_smoke` connect SSL va login auto-register thanh cong tren DigitalOcean schema hien tai.
+- Cap nhat 2026-05-26: da chuyen runtime DB sang DigitalOcean PostgreSQL managed. Ca `.env` root va `setup\.env` deu dang tro toi host DigitalOcean `nt106-drawing-db-do-user-37788577-0.m.db.ondigitalocean.com:25060/defaultdb` bang URI `postgresql://...?...sslmode=require` (khong ghi secret vao tai lieu). Da them `SharedLib.Config.PostgresConnectionString.Normalize` va dung trong `DbManager`, `CrossServerSyncService`, `LoadBalancer` de Npgsql nhan duoc URI DigitalOcean/Postgres URI thay vi bao loi `Couldn't set postgresql://...sslmode`. `setup\.env.example` ghi ro chap nhan ca URI DigitalOcean va key-value Npgsql.
+- Cap nhat 2026-05-26: user chot khong can copy du lieu ung dung tu Neon sang DigitalOcean, chi can schema/bang giong nhau. Da dung helper schema-only reset `public` tren DigitalOcean va apply migrations `001_base_schema.sql` den `005_drop_snapshots.sql`; doi soat shape Neon va DigitalOcean khop 10 bang active: `actionstack`, `airesults`, `chathistory`, `drawhistory`, `gallery`, `pixelartcells`, `roomevents`, `rooms`, `servernodes`, `users` voi cung so cot tuong ung. Sau schema-only reset, row count tren DigitalOcean deu bang 0.
+- Cap nhat 2026-05-26: `local/tmp_neon_migrator` co them `MIGRATOR_ENV_PATH` de chon file env, lenh `schema-only`/`reset-schema` de reset va apply schema khong copy data, va lenh `shape`/`schema-audit` de xem so cot moi bang. `migrate` van la luong copy data day du neu sau nay can.
+- Cap nhat 2026-05-26: da bo tinh nang snapshot tu dong va khoa vung ve khoi code/schema. Server khong con start `SnapshotService`, khong con handler `SNAPSHOT_LIST`/`SNAPSHOT_RESTORE`, `SharedLib` khong con payload/command snapshot va claim area, client khong con Shift+right-drag chon vung, `DbManager` khong con API snapshot. Da tao migration `005_drop_snapshots.sql`, go table/index `Snapshots` khoi fresh schema va da apply len Neon online: `Snapshots` hien khong con ton tai. Build pass va test pass 17 skip 1.
+- Cap nhat 2026-05-26: ve theo luot da doi quyen chuyen luot. Chu phong van la nguoi bat/tat turn-based, nhung chi user dang giu `ActiveDrawingUser` moi thay/bam duoc nut `Luot ke tiep`; server TCP/UDP enforce `TURN_CHANGE` chi hop le khi `requestedBy == ActiveDrawingUser`.
+- Cap nhat 2026-05-26 (dieu chinh theo feedback user): toolbar `MainForm` KHONG tang chieu cao de chua nut. Da doi sang layout compact 3 dong (cao `112px`) theo huong Paint, moi dong co 2 cum trai/phai (`Dock=Fill` + `Dock=Right`) de tan dung khoang trong ben phai va tranh tran ngang. Tool ve duoc rut gon thanh icon nho, cac nhom `Dieu huong`, `Nen`, `Canvas`, `Tep/Luu`, `AI`, `Sticker` duoc dan lai de de thao tac nhanh.
+- Cap nhat 2026-05-26: da build lai toan bo solution thanh cong (`dotnet build .\NT106_DrawingApp.sln -v:minimal`) va da chay `setup/package-release.ps1` thanh cong de cap nhat binary Release vao `setup/apps`, dong thoi tao lai goi `NT106-DrawingApp-setup.zip`.
+- Cap nhat 2026-05-26: da bo toan bo UI lien quan den follow user trong `MainForm` (o nhap username follow, nut follow, label trang thai follow) va bo subscribe handler `OnFollowModeReceived` tren client UI.
+- Cap nhat 2026-05-26: da build lai toan solution va build lai tung app vao `setup\apps` (dung cho `start-local-no-lb.ps1`). Khi client dang mo, file `setup\apps\DrawingClient\SharedLib.dll` se bi lock nen can dong `DrawingClient.exe` truoc khi rebuild runtime binary. Sau khi stop process va build lai, `start-local-no-lb.ps1` da mo ra `DrawingClient.exe`/`DrawingServer.exe` tu `setup\apps`.
+- Cap nhat 2026-05-25: da audit Neon cloud bang helper Npgsql. Truoc khi don, schema co cac bang rong/khong con code dung: `clientratelimits`, `gifexports`, `roommembers`, `stickers`, `stickynotes`, `stickynotereplies`. Da them va apply migration `004_drop_unused_tables.sql`; schema cloud sau dot don moi 2026-05-26 con cac bang active: `users`, `rooms`, `drawhistory`, `chathistory`, `gallery`, `actionstack`, `airesults`, `pixelartcells`, `servernodes`, `roomevents`.
+- Cap nhat 2026-05-25: setup demo Internet dung ngrok. Internet demo chi public TCP vao LoadBalancer: client -> ngrok TCP -> LB -> 2 server -> Neon; bo UDP trong kich ban Internet va de cursor/tin hieu tam thoi di TCP fallback. UDP proxy LB `9001` van giu cho local/LAN khi can demo noi bo.
+- Cap nhat 2026-05-25: `setup/` la goi duy nhat cho moi role. Script load secret tu `setup\.env` (copy tu `setup\.env.example`), khong hoi/truyen `DATABASE_URL` hay server certificate/password qua command line; chi hoi host/IP/port public/LAN/ngrok khi can. Port mac dinh: server-1 TCP/UDP `8888/8889`, server-2 `8890/8891`, LoadBalancer TCP/UDP `9000/9001`. `start-load-balancer.ps1 -StartNgrok` tu mo LB, doi port TCP local san sang, roi chay `ngrok tcp 9000` va in host/port public neu doc duoc API ngrok `127.0.0.1:4040`. `start-client.ps1 -Mode LbRelay -InternetNgrok -Host <ngrok-host> -TcpPort <ngrok-port>` tu tat `LOAD_BALANCER_UDP_PROXY`.
+- Cap nhat 2026-05-25: da sua loi PowerShell `Cannot overwrite variable Host` trong `setup/start-client.ps1` bang cach doi bien noi bo thanh `TargetHost` va giu alias `-Host` de lenh cu van dung. Cac script role khong hoi port nua; port lay tu `setup\.env` hoac mac dinh. Khi can host/IP, script chi hoi IP: `start-load-balancer.ps1` hoi `Server-1 host/IP` va `Server-2 host/IP`, co giai thich cach lay bang `ipconfig`/`tailscale ip -4` va default `127.0.0.1` nghia la cung may. `start-server.ps1 -ServerId server-2` nay dung mac dinh `8890/8891` neu `.env` van de `SERVER_ID=server-1`. Da chay `setup/package-release.ps1` de build Release va cap nhat `setup/apps`, sau do smoke test `start-local-no-lb.ps1 -ClientCount 0` va `start-local-with-lb.ps1 -ClientCount 0` deu mo port thanh cong.
+- Cap nhat 2026-05-25: fix crash client khi login/join qua LB/ngrok bang cach boc `NetworkEvents` bang safe invoke/log exception, them WinForms unhandled exception logging vao `DrawingClient/Program.cs` (`setup/apps/DrawingClient/logs/client_log.txt`), va sua `LobbyForm` de handler join/create room marshal ve UI thread truoc khi cham control/form. `LoginForm` khong fallback direct nua khi dang o mode LoadBalancer tru khi `CLIENT_ALLOW_DIRECT_FALLBACK=1`, tranh thu ket noi sai `ngrok-host:8888` neu relay loi. `LoadBalancerRouteClient` throw ro neu LB tra `{error}`. `setup/start-local-with-lb.ps1` co them `-StartNgrok`, dung cho topology 2 server + LB cung may; day la kich ban dung neu user chay 2 server tren cung may voi LB, khong can Tailscale. Da build Debug pass, package Release cap nhat `setup/apps`/zip, smoke `start-local-with-lb.ps1 -ClientCount 0 -StopExisting` pass, test pass 17 skip 1.
+- Cap nhat 2026-05-25: fix hien tuong client treo tai login khi ket noi Internet qua LB/ngrok bang cach doi `LoginForm` sang ket noi async, them timeout TCP/TLS trong `ClientNetwork` (`CLIENT_CONNECT_TIMEOUT_MS`, mac dinh 6000ms), va them timeout doc ROUTE trong `LoadBalancerRouteClient`. Neu LB/backend/ngrok loi, UI khong bi khoa vo han ma tra ve "Khong the ket noi may chu" va ghi log. Da build Debug pass, test pass 17 skip 1, package Release cap nhat `setup/apps` va `NT106-DrawingApp-setup.zip`.
+- Cap nhat 2026-05-25: bo sung kich ban Internet direct khong qua LoadBalancer: server chay `setup/start-server.ps1 -ServerId server-1 -StartNgrok -StopExisting` hoac `ngrok tcp 8888`; client chay `setup/start-client.ps1 -Mode Direct -InternetNgrok -Host <ngrok-host> -TcpPort <ngrok-port>`. Script client direct ngrok set `CLIENT_FORCE_TCP_REALTIME=1`, khong dung UDP vi ngrok TCP khong public UDP.
+- Cap nhat 2026-05-25: file `local/plan/13_cau_hoi_dua_du_an_vao_thuc_te.md` da bi huy theo yeu cau user vi khong dung y; cac cau hoi moi phai duoc dat trong trao doi truoc khi lap plan/thuc thi.
+- Cap nhat 2026-05-25: client direct mode van doc `SERVER_UDP_PORT` cho LAN/direct. Kich ban Internet moi khong khuyen nghi direct server qua ngrok vi ngrok TCP khong public UDP; dung LB relay + TCP fallback.
+- Canvas da chot co dinh 1920x1080 tren client va room; canvas nay tu cover vung nhin thay o muc zoom-out toi da (khong lo khoang chet), khong con combobox chon kich thuoc trong sidebar. Zoom la local, dung `Ctrl + MouseWheel`, `Ctrl +` va `Ctrl -`; co tool `Chuá»™t` de pan viewport bang cach giu chuot trai keo, va khung ben phai co the an/hien tu thanh cong cu trai de mo rong vung ve.
+- Cap nhat 2026-05-25: UI `MainForm` da duoc polish lai theo huong ngang gon hon: toolbar chuyen len phia tren, nhom nut ve/nhap/xuat/gallery/AI duoc sap xep thanh cac cum icon, undo/redo va cac loai but dung ky hieu thay cho chu text, khung ben phai thu gon hon va co nut an/hien ngay tren khung chat. Chi thay giao dien, khong doi logic ve/net/AI/chat.
+- Cap nhat 2026-05-26: UI `MainForm` da reflow lai thanh cac dong wrap khong scroll (khong dung overflow hay thanh cuon) de khong con tran sang ben phai ngay ca khi full screen; cac nut duoc rut gon con icon ngan, vao tinh than Microsoft Paint toi gian va de thao tac hon. `stickerPicker` van mo dang popup nho, khong chiem chieu cao thanh cong cu.
+- Cap nhat 2026-05-26: UI `MainForm` da chuyen sang toolbar phang theo cac dải nong, khong con khung vuong chia group; cac tool van duoc giu day du va duoc sap xep gon thanh cac dải `Vẽ`, `Điều hướng`, `Nền`, `Canvas`, `Tệp/Lưu`, `AI`, `Sticker` de khong mat bat ky cong cu nao. Da bo header strip nho nam phia tren tab `Chat` trong khung ben phai; sidebar chi con tabs `Members/Chat/Nhật ký` + o nhap chat o duoi, logic chat/network khong doi.
 - User da test va xac nhan tot luong canvas viewport moi: zoom-out toi da van ve duoc o moi diem dang thay, va nen mau/anh duoc phu dung theo viewport.
 - Test gan nhat 2026-05-25: `dotnet test .\NT106Tests\NT106Tests.csproj -v:minimal -p:OutputPath=..\local\tmp_build\Tests\` pass 17, skip 1 (`TcpConcurrentConnections_10Clients` can server dang chay), total 18. Lenh test mac dinh bi khoa neu `DrawingClient.exe` dang mo.
 - Da xoa cac tinh nang game/challenge da bo: scoring/leaderboard, drawing prompt, blind draw va vote contract; giu lai pixel art nhu tinh nang to mau cong tac theo tung pixel.
 - `LoadBalancer` da chuyen sang SDK-style `PackageReference`, dung `Npgsql 8.0.9` giong `DrawingServer`.
-- Realtime drawing da chot dung TCP cho draw/flood fill/text o ca relay va direct/LAN de tranh mat net do UDP drop. UDP van la duong nhanh cho cursor/laser/ping/pixel-art trong direct/LAN, nhung cursor/laser da co TCP fallback cho LB relay/ngrok hoac client chua co UDP endpoint. Reaction da duoc user loai khoi scope. Server TCP draw/flood fill/text/spray broadcast ngay, luu `DrawHistory` nen sau, de Neon khong nam tren critical path cua net ve.
+- Realtime drawing da chot dung TCP cho draw/flood fill/text o ca relay va direct/LAN de tranh mat net do UDP drop. UDP van la duong nhanh cho cursor/ping/pixel-art trong direct/LAN, cursor co TCP fallback cho LB relay/ngrok hoac client chua co UDP endpoint. Laser da bo khoi scope theo yeu cau moi; server bo qua goi `LASER` legacy. Reaction da duoc user loai khoi scope. Server TCP draw/flood fill/text/spray broadcast ngay, luu `DrawHistory` nen sau, de Neon khong nam tren critical path cua net ve.
 - Da bo sung chon anh lam nen canvas: client chon file local, nen anh duoc nen/rescale ve kich thuoc canvas, gui bang `SET_BACKGROUND` voi `SetBackgroundPayload.ImageData`, server luu/replay trong `DrawHistory` nhu `ToolType=SetBackground`.
 - Da sua loi TextBox tool: toa do text duoc luu theo he canvas (khong con mat/lech chu khi zoom-pan), va text duoc render theo object layer de co the keo-tha/chinh co sau khi dat.
 - Da bo sung object manipulation tren client (tool `Mouse`): image import, sticker, textbox text va sticky note deu co the keo-tha; image/sticker/sticky note resize duoc, text doi co chu. Dong bo/replay dua tren `ActionID` de update dung object thay vi tao ban sao.
@@ -47,10 +68,11 @@ Demo ha tang da chot:
 - AI hien chi con 2 tinh nang active: Hugging Face Stable Diffusion text-to-image va Remove.bg xoa nen. Cap nhat 2026-05-25: user chuyen tu Google/Imagen sang Hugging Face access token. `.env`/`.env.example` dung `HF_TOKEN` va `HF_IMAGE_MODEL=stabilityai/stable-diffusion-xl-base-1.0`; khong con can `GEMINI_API_KEY`/`GEMINI_IMAGE_MODEL` cho tinh nang tao anh active. `DrawingClient/AI/StabilityAiClient.cs` goi Hugging Face Routing endpoint `https://router.huggingface.co/nscale/v1/images/generations` voi header `Authorization: Bearer <HF_TOKEN>`, body JSON `response_format="b64_json"`, `prompt`, `model`, roi doc anh tu `data[0].b64_json`. `MainForm` goi `StabilityAiClient.GenerateImageAsync`; server luu `AiResults.provider="huggingface"` va model theo `HF_IMAGE_MODEL`. Kiem thu API that ngay 2026-05-25 voi token hien tai pass, sinh PNG 1024x1024 tu prompt test. Remove.bg co 2 luong: neu dang chon image object tren canvas thi xoa nen va cap nhat lai dung object do bang cung `ActionID`; neu khong chon image thi chon file, xoa nen, tu chen giua canvas. User da xac nhan Remove.bg hoat dong on ngay 2026-05-25. Ca hai deu sync qua server, replay nhu `ImportImage`, luu `AiResults` va `DrawHistory`; server broadcast truoc, luu DB nen sau.
 - Undo/redo da chuyen sang theo action cua chinh user: client luu lich su `DrawAction` theo `ActionID`/`Username`, moi stroke keo but dung chung mot `ActionID`, Ctrl+Z/Undo chi danh dau an dung 1 action gan nhat cua user hien tai va render lai lich su; Redo khoi phuc action tu stack cua user. Server dong dau `Username` tu session vao payload `UNDO`/`REDO`, luu vao `ActionStack`, va khi client join sau thi gui `SYNC_BOARD` truoc roi phat lai stack undo/redo de client moi thay dung trang thai hien tai.
 - "Nan hinh thong minh" theo scope toi gian da hoan thien: khi ve Rectangle hoac Circle ma giu `Shift`, preview va net ve cuoi duoc ep thanh square/perfect circle.
-- Cursor realtime va laser da toi uu lai ngay 2026-05-25 cho direct/LAN tren mot may: client khong con gui cursor theo mau thua 35ms trong UI thread, ma luu latest-state moi lan `MouseMove` va timer nen flush `CURSOR`/`LASER` moi ~8ms. Khi `_udpManager` san sang va `PreferTcpRealtime=false`, flush di UDP/AES; TCP chi la fallback khi relay/ngrok (`PreferTcpRealtime=true`) hoac UDP khong khoi tao duoc. Server UDP khong spam log cho `CURSOR`/`LASER`, bo echo ve sender de giam tai, va chi TCP fallback cho client trong room chua co UDP endpoint. Client nhan TCP/UDP deu raise cung `NetworkEvents`, bo qua packet cua chinh user, va render remote cursor/laser trong `CanvasManager` bang toa do canvas sau zoom/pan (`CanvasManager.ScreenToCanvas`).
-- Da cap nhat `local/features.md` ngay 2026-05-25: bang tinh nang bay gio tach `✅` chac chan co luong user-facing/code ro, `⚠️` co mot phan/can demo that, `❌` chua dap ung mo ta, `BỎ` la ngoai pham vi. User da chot: observer chi xem/chat va bo reaction; undo/redo theo action cua chinh minh da lam; GIF export da bo hoan toan khoi scope; pixel art tich hop canvas 64x64; bo watermark; bo sticker rotate UI; bo sticky note replies; canvas size co dinh moi room, chi zoom local; snapshot UI don gian da bo khoi scope theo yeu cau moi.
+- Cursor realtime da toi uu lai ngay 2026-05-25: client luu latest-state moi lan `MouseMove`, gan `RoomCode` + `Timestamp`, flush `CURSOR` tu timer nen moi ~12ms qua UDP/AES khi co `_udpManager` va `PreferTcpRealtime=false`, hoac TCP fallback khi relay/ngrok/UDP khong kha dung. Ben nhan khong `BeginInvoke` tung goi nua ma gom latest cursor theo user va render bang timer UI ~15ms, bo qua packet cu hon theo `Timestamp` de tranh backlog lam tre. `UdpManager` cache server endpoint de khong resolve host moi lan gui. Server UDP khong spam log cursor, khong echo ve sender, chuan hoa `Username`/`RoomCode`/`Timestamp`, va chi TCP fallback cho client trong room chua co UDP endpoint. Laser da bo khoi scope; client khong gui/nhan/render laser, server UDP bo qua `LASER` legacy.
+- Da cap nhat `local/features.md` ngay 2026-05-25: bang tinh nang bay gio tach `âœ…` chac chan co luong user-facing/code ro, `âš ï¸` co mot phan/can demo that, `âŒ` chua dap ung mo ta, `Bá»Ž` la ngoai pham vi. User da chot: observer chi xem/chat va bo reaction; undo/redo theo action cua chinh minh da lam; GIF export da bo hoan toan khoi scope; pixel art tich hop canvas 64x64; bo watermark; bo sticker rotate UI; bo sticky note replies; canvas size co dinh moi room, chi zoom local; snapshot UI don gian da bo khoi scope theo yeu cau moi.
 - GIF export da bi loai bo hoan toan ngay 2026-05-25 theo yeu cau user sau khi tinh nang hoat dong khong on dinh. Khong con UI `Xuat GIF`, progress/status GIF, `ClientNetwork.SendExportGifRequest`, `NetworkEvents.OnGifExportProgress`, shared command `EXPORT_GIF_REQUEST`/`GIF_EXPORT_PROGRESS`, `SharedLib/Payloads/GifExportPayload.cs`, `DrawingServer/Services/GifExportService.cs`, `DrawingServer/Services/DrawHistoryCache.cs`, server handler export GIF, test `NT106Tests/GifExportServiceTests.cs`, hay schema `GifExports` trong migration/setup. Neu sau nay co yeu cau anh dong, phai xem nhu tinh nang moi va hoi user chot lai scope/contract.
 - LB relay dang dung `LOAD_BALANCER_STRATEGY=room-affinity`: client join room hoi `ROUTE room=<roomCode>`, LB doc `Rooms.owner_server_id`, client reconnect qua `RELAY server=<server_id>` truoc TLS handshake de join dung backend owner cua room.
+- LB room-affinity phai fail closed: neu `ROUTE room=<roomCode>` khong doc duoc `owner_server_id` hoac owner server unhealthy, LB khong duoc fallback random sang backend khac. Client phai dung join va bao loi route de tranh chia cung room qua nhieu server.
 - Cac chang 01-07 da code/test boi Codex va duoc chuyen vao `local/done/`; con can user demo that de danh dau accepted neu chua co xac nhan.
 
 ## File quan trong can doc/sua
@@ -58,34 +80,42 @@ Demo ha tang da chot:
 ### Client
 
 - `DrawingClient/Forms/LoginForm.cs`: login/register, quyet dinh ket noi direct/relay qua LB, subscribe auth events.
-- `DrawingClient/Forms/LobbyForm.cs`: tao/join room; truoc join room relay se route/reconnect den owner server.
-- `DrawingClient/Forms/MainForm.cs`: UI chinh, toolbars, AI buttons, chat/members, event handlers realtime, zoom local, toggle an/hien khung phai. Cursor/laser direct/LAN dung latest-state pump flush ~8ms qua UDP de tranh nhay theo mau thua; TCP chi fallback khi relay/ngrok hoac UDP loi.
+- `DrawingClient/Forms/LoginForm.cs`: khi `USE_LOAD_BALANCER_ROUTING=1`, khong fallback direct neu relay/LB loi tru khi set `CLIENT_ALLOW_DIRECT_FALLBACK=1`; tranh sai huong qua ngrok.
+- `DrawingClient/Forms/LoginForm.cs`: login/register connect async de UI khong treo khi ngrok/LB/backend cham; direct mode hien default `SERVER_PUBLIC_HOST`, LB mode hien `LOAD_BALANCER_HOST`.
+- `DrawingClient/Forms/LobbyForm.cs`: tao/join room; truoc join room relay se route/reconnect den owner server. Handler join/create room phai marshal ve UI thread truoc khi tao/show/dispose `MainForm` hoac cap nhat control.
+- `DrawingClient/Forms/MainForm.cs`: UI chinh, toolbars, AI buttons, chat/members, event handlers realtime, zoom local, toggle an/hien khung phai. Cursor dung latest-state pump flush ~12ms qua UDP hoac TCP fallback; ben nhan gom latest cursor theo user va render timer UI ~15ms de khong bi backlog goi cu.
+- `DrawingClient/Forms/MainForm.cs`: UI chinh da chuyen toolbar len tren cung, icon hoa undo/redo va cac tool ve, sap xep lai sticker/import/export/gallery/AI thanh cum gon hon; sidebar phai hinh thanh khung chat/members/logs thu gon va co nut an/hien.
+- `DrawingClient/Forms/MainForm.cs`: UI tiep tuc duoc tinh gon theo mau Paint: cac dong toolbar wrap khong scroll thay vi overflow, chia ranh tool / file-AI / sticker-chat de khong tran ngang, icon nut rut gon de de nhan dien, va sticker library mo popup thay vi chen panel lon trong toolbar.
 - `DrawingClient/Forms/MainForm.cs`: quan ly lich su action client-side cho undo/redo theo `ActionID`/`Username`; chi undo/redo action gan nhat cua chinh user hien tai va render lai lich su visible.
 - `DrawingClient/Drawing/CanvasManager.cs`: ve tren canvas 1920x1080 co dinh, fit viewport, pan/zoom local, mouse events, render draw actions, background mau/anh, image/sticker/text.
 - `DrawingClient/Drawing/CanvasManager.cs`: rectangle/circle giu `Shift` khi keo chuot se ep thanh square/perfect circle; pen stroke trong mot lan keo dung chung `ActionID` de undo lui dung 1 stroke.
 - `DrawingClient/Drawing/CanvasManager.cs`: quan ly object selection/manipulation cho image/sticker/text, hover cursor resize o goc, va API `DeleteSelectedObject()` de xoa object dang chon.
 - `DrawingClient/Drawing/CanvasManager.cs`: resize object da chon bang 4 handle o 4 goc, co tinh toan resize theo tung goc (top-left/top-right/bottom-left/bottom-right).
-- `DrawingClient/Drawing/CanvasManager.cs`: render remote cursor/laser theo toa do canvas sau transform zoom/pan; co `UpdateRemoteCursor`, `RemoveRemoteCursor`, `UpdateRemoteLaser`, `RemoveRemoteLaser`.
+- `DrawingClient/Drawing/CanvasManager.cs`: render remote cursor theo toa do canvas sau transform zoom/pan; co `UpdateRemoteCursor`, `RemoveRemoteCursor`. Laser render da bi go.
 - `DrawingClient/Drawing/TextTool.cs`: TextBox editor tren viewport; commit text ve toa do canvas de sync/replay/manipulation khong lech khi zoom-pan.
-- `DrawingClient/Network/ClientNetwork.cs`: TCP/TLS client, heartbeat, reconnect room-owner qua LB, send/receive packet; co `SendCursorRealtime`/`SendLaserRealtime` va nhan `CURSOR`/`LASER` TCP lam fallback cho relay/ngrok.
+- `DrawingClient/Network/ClientNetwork.cs`: TCP/TLS client, heartbeat, reconnect room-owner qua LB, send/receive packet; co `SendCursorRealtime` va nhan `CURSOR` TCP lam fallback cho relay/ngrok.
+- `DrawingClient/Network/ClientNetwork.cs`: TCP connect va TLS handshake co timeout `CLIENT_CONNECT_TIMEOUT_MS` (mac dinh 6000ms); `CLIENT_FORCE_TCP_REALTIME=1` bat TCP fallback cho realtime tam thoi trong kich ban direct Internet/ngrok.
 - `DrawingClient/Network/LoadBalancerRouteClient.cs`: goi `ROUTE` va `ROUTE room=<roomCode>` den LB.
-- `DrawingClient/Network/UdpManager.cs`: UDP realtime local/direct, `UDP_PING` burst dang ky endpoint; cursor/laser uu tien UDP khi direct/LAN, con relay/ngrok TCP khong khoi tao UDP vi `PreferTcpRealtime=true` va dung TCP fallback trong `ClientNetwork`.
-- `DrawingClient/UI/CursorLayer.cs`: hien chi con dung cho emoji/reaction overlay cu; khong con la noi render cursor/laser.
+- `DrawingClient/Network/LoadBalancerRouteClient.cs`: ROUTE co timeout connect/read va throw ro khi LB tra `{error}`.
+- `DrawingClient/Network/NetworkEvents.cs`: event hub boc tung subscriber bang try/catch va log exception de event tu network thread khong lam chet app.
+- `DrawingClient/Network/UdpManager.cs`: UDP realtime local/direct, `UDP_PING` burst dang ky endpoint co kem `ServerId` cho LB UDP proxy; cursor uu tien UDP khi direct/LAN, con relay/ngrok khong co UDP proxy thi dung TCP fallback trong `ClientNetwork`. Cache server endpoint de tranh resolve host moi packet.
+- `DrawingClient/UI/CursorLayer.cs`: hien chi con dung cho emoji/reaction overlay cu; khong con la noi render cursor.
 - `DrawingClient/AI/StabilityAiClient.cs`, `RemoveBgClient.cs`: Hugging Face Stable Diffusion text-to-image va remove background. `GeminiClient.cs` da bi go khoi project sau khi chuyen provider tao anh sang Hugging Face.
 
 ### Server
 
 - `DrawingServer/Program.cs`: doc env, khoi dong TCP/UDP, heartbeat server node, cross-server sync.
-- `DrawingServer/Network/SecureTcpServer.cs`: TCP/TLS protocol, login/room/chat/draw, relay fallback, fast-path broadcast, DB save nen; nhan `CURSOR`/`LASER` TCP de broadcast realtime tam thoi trong room ma khong luu DB.
+- `DrawingServer/Network/SecureTcpServer.cs`: TCP/TLS protocol, login/room/chat/draw, relay fallback, fast-path broadcast, DB save nen; nhan `CURSOR` TCP fallback de broadcast realtime tam thoi trong room ma khong luu DB.
 - `DrawingServer/Network/SecureTcpServer.cs`: voi `IMPORT_IMAGE`, server giu `ActionID` tu payload khi save `DrawHistory` de replay dung luong update object.
 - `DrawingServer/Network/SecureTcpServer.cs`: voi `UNDO`/`REDO`, server luu action vao `ActionStack` va khi client join se gui history roi replay undo/redo stack cho client moi.
 - `SharedLib/Payloads/DrawPayload.cs`, `InteractionPayload.cs`, `SyncPayload.cs`: bo sung truong `IsDeleted` cho luong text/import-image/sticker de phat lenh xoa object ma khong can them command moi.
 - `DrawingClient/Forms/MainForm.cs`: sticky note co luong select/delete rieng; khi nhan packet `STICKY_NOTE` ma `IsOpen=false` thi remove control note neu dang ton tai.
-- `DrawingServer/Network/SecureUdpServer.cs`: UDP/AES realtime local/direct, endpoint registration, TCP fallback cho client chua co UDP endpoint, bao gom cursor/laser. Tranh log moi goi cursor/laser va khong echo pointer ve sender de giu latency thap.
+- `DrawingServer/Network/SecureUdpServer.cs`: UDP/AES realtime local/direct, endpoint registration, TCP fallback cho client chua co UDP endpoint, bao gom cursor. Tranh log moi goi cursor, khong echo pointer ve sender, chuan hoa `Username`/`RoomCode`/`Timestamp`, va bo qua `LASER` legacy.
 - `DrawingServer/Services/RoomService.cs`: active room state, member list, room owner, turn-based state.
 - `DrawingServer/Services/CrossServerSyncService.cs`: PostgreSQL `LISTEN/NOTIFY` fallback khi room bi chia server.
 - `DrawingServer/Services/ServerNodeHeartbeatService.cs`: upsert `ServerNodes` de theo doi backend.
-- `DrawingServer/Services/Database/DbManager.cs`: Neon/PostgreSQL access, rooms, draw history, chat, gallery, AI, snapshots, pixel art.
+- `DrawingServer/Services/Database/DbManager.cs`: Neon/PostgreSQL access, rooms, draw history, chat, gallery, AI, pixel art va timeline theo `DrawHistory`.
+- `DrawingServer/Services/Database/StrokePersistenceQueue.cs`: hang doi luu `DrawHistory` tuan tu co retry/backoff, giu pending stroke theo room trong RAM de `SYNC_BOARD` cho client join sau khong thieu net khi DB dang het slot/cham flush.
 - `DrawingServer/Services/Database/DbManager.cs`: co `SaveActionStackAsync`, `GetActionStackEntriesAsync`, `ClearActionStackAsync` cho undo/redo persistent theo room.
 - `DrawingServer/Services/Database/Migrations/*.sql`: migration chinh.
 
@@ -116,17 +146,14 @@ Demo ha tang da chot:
 - `local/plan/10_runbook_demo_va_doi_soat.md`: cach user chay thu va xac nhan.
 - `local/plan/11_nhat_ky_thuc_thi_2026-05-24.md`: nhat ky.
 - `local/done/`: chang da code/test xong boi Codex.
-- `local/setup/setup.md`, `scenario-*.ps1`: runbook/script demo local, LAN, internet/ngrok.
-- `role-setup/`: goi script theo role cho client/load balancer/server; ho tro local, LAN va playit internet direct/relay.
-- `local/plan/12_kich_ban_demo_playit.md`: kich ban demo playit, phan biet TCP/UDP direct va TCP relay qua LB.
-- `local/plan/13_cau_hoi_dua_du_an_vao_thuc_te.md`: danh sach cau hoi can chot truoc khi dua du an vao thuc te.
+- `setup/`: goi setup duy nhat cho moi role; co script hoi thong so, chay exe build san, README va checklist demo local/LAN/internet ngrok/Tailscale.
 
 ## Realtime drawing: duong di va diem nghen
 
 Co 2 mode:
 
-- Direct/LAN: client ket noi thang server hoac LB route truc tiep backend. Draw/flood fill/text di TCP reliable; UDP uu tien cho cursor/laser va endpoint registration, co TCP fallback cho client chua co UDP endpoint. Cursor/laser duoc gui theo latest-state moi ~8ms, bo qua cac vi tri cu neu da co vi tri moi hon, de ben nhan thay trang thai hien tai thay vi backlog diem qua khu.
-- Relay/ngrok: client chi ket noi TCP vao LB/ngrok, drawing/flood fill/text va cursor/laser gui qua TCP vi ngrok TCP khong relay UDP.
+- Direct/LAN: client ket noi thang server hoac LB route truc tiep backend. Draw/flood fill/text di TCP reliable; UDP uu tien cho cursor va endpoint registration, co TCP fallback cho client chua co UDP endpoint. Cursor duoc gui theo latest-state moi ~12ms, va ben nhan chi render vi tri moi nhat moi ~15ms, bo qua cac vi tri cu theo `Timestamp` de thay trang thai hien tai thay vi backlog diem qua khu.
+- Relay/ngrok qua LB: client ket noi TCP vao public ngrok host/port cua LB. Internet khong dung UDP proxy; cursor/tin hieu tam thoi di TCP fallback. UDP proxy `9001` chi dung cho local/LAN khi client bat `LOAD_BALANCER_UDP_PROXY=1`.
 
 Duong relay hien tai:
 
@@ -138,11 +165,13 @@ Duong relay hien tai:
 6. LB proxy phien TLS den dung backend.
 7. Client login lai nen, gui `JOIN_ROOM`.
 8. Khi ve, server `SecureTcpServer` broadcast packet cho client cung room truoc, roi moi luu `DrawHistory` nen.
+9. Khi client join sau, history phai di qua chunked `SYNC_BOARD` (`SyncBoardPayload.RawActions`, `ChunkIndex`, `TotalChunks`, `IsFinalChunk`) de tranh packet qua lon lam client disconnect. Client gom chunk trong `MainForm.actionHistory` va render mot lan khi chunk cuoi den.
 
 Diem can tranh:
 
 - Khong de client cung room roi vao 2 backend khac nhau; neu bi chia, net ve phai di qua `CrossServerSyncService`/PostgreSQL notify va se cham.
 - Khong `await DbManager.SaveStrokeAsync` truoc broadcast cho net ve realtime.
+- Khong goi `DbManager.SaveStrokeAsync` truc tiep cho tung packet ve tan suat cao tren path realtime. Dung `StrokePersistenceQueue.Enqueue`; queue tu retry neu DB bao `53300`/het slot, va `GetRoomHistoryAsync` them pending stroke cho client vao sau.
 - Khong dua draw/flood fill/text quan trong qua UDP trong direct/LAN. UDP co the roi goi nen se lam mat vinh vien tung doan stroke tren may khac; neu can dam bao khong mat net, client phai gui cac lenh nay bang TCP (`ClientNetwork.SendDrawRealtime`, `SendFloodFillRealtime`, `SendTextRealtime`).
 - Doi voi image/sticker/text co thao tac move/resize, giu nguyen `ActionID` khi gui update. Client replay can map `ActionID` vao object hien co; neu doi `ActionID` moi lan se tao ban sao khong mong muon.
 - Khi xoa image/sticker/text, gui cung `ActionID` va dat `IsDeleted=true`. Client nhan se remove object khoi object layer; replay tu `DrawHistory` se cho ket qua cuoi cung dung.
@@ -162,18 +191,26 @@ Client/LB:
 - `LOAD_BALANCER_STRATEGY=room-affinity`
 - `LOAD_BALANCER_HOST=127.0.0.1` hoac host ngrok
 - `LOAD_BALANCER_PORT=9000` hoac port ngrok
+- `CLIENT_CONNECT_TIMEOUT_MS=6000` mac dinh timeout TCP/TLS cua client, tranh login treo vo han khi ngrok/LB/backend khong phan hoi.
+- `CLIENT_FORCE_TCP_REALTIME=1` dung cho Internet direct qua ngrok TCP de cursor/tin hieu tam thoi di TCP fallback thay vi UDP.
 
 Server:
 
 - `SERVER_ID=server-1` / `server-2` phai khop `LoadBalancer/servers.json`.
 - `SERVER_NAME`, `SERVER_TCP_PORT`, `SERVER_UDP_PORT`, `SERVER_PUBLIC_HOST`.
-- `SERVER_CERT_PATH=server.pfx`, `SERVER_CERT_PASSWORD=...`.
-- `DATABASE_URL=Host=your-db-host;Port=5432;Database=drawingapp;Username=your_user;Password=your_password;
+- `SERVER_CERT_PATH`, `SERVER_CERT_PASSWORD`, `DATABASE_URL` deu nam trong `setup\.env`/process env; setup script khong hoi cac gia tri nay tren man hinh.
 
 AI:
 
 - `HF_TOKEN`, `HF_IMAGE_MODEL` (mac dinh `stabilityai/stable-diffusion-xl-base-1.0`; Hugging Face Routing dang goi nscale image generation endpoint).
 - `REMOVE_BG_API_KEY`.
+
+Build va dong bo database:
+
+- `DrawingServer`, `LoadBalancer` va helper migration tam thoi `local/tmp_neon_migrator` dang dung `Npgsql 8.0.9`.
+- `local/tmp_neon_migrator` co cac che do: `audit` de dem row count schema cong khai, `shape`/`schema-audit` de doi soat so cot, `schema-only`/`reset-schema` de reset/apply schema khong copy data, va `migrate` de copy du lieu tu DB nguon sang DB dich qua `TARGET_DATABASE_URL`.
+- Helper migration chap nhan `DATABASE_URL` dang `key=value` va `postgresql://...`, tu dong chuan hoa `sslmode=require`; co the set `MIGRATOR_ENV_PATH=setup\.env` de audit/apply DigitalOcean thay vi `.env` root.
+- `setup/package-release.ps1` build lai binary release vao `setup/apps` va dong goi lai `NT106-DrawingApp-setup.zip`.
 
 ## Build, test, demo
 
@@ -189,6 +226,12 @@ Build:
 dotnet build .\NT106_DrawingApp.sln -v:minimal
 ```
 
+Release package:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup\package-release.ps1
+```
+
 Test:
 
 ```powershell
@@ -198,7 +241,28 @@ dotnet test .\NT106Tests\NT106Tests.csproj -v:minimal
 Demo local nhanh:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\local\setup\scenario-1-local.ps1
+powershell -ExecutionPolicy Bypass -File .\setup\start-local-with-lb.ps1 -StopExisting
+```
+
+Demo local 1 server khong LoadBalancer:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup\start-local-no-lb.ps1 -StopExisting
+```
+
+Neu chi can smoke server local khong mo client:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup\start-local-no-lb.ps1 -ClientCount 0 -StopExisting
+```
+
+Script local-no-lb phai in `server-1 san sang TLS tai 127.0.0.1:8888`; client do script mo se chay direct vao `127.0.0.1:8888`, khong di qua LoadBalancer.
+
+Demo Internet direct server khong qua LoadBalancer:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup\start-server.ps1 -ServerId server-1 -StartNgrok -StopExisting
+powershell -ExecutionPolicy Bypass -File .\setup\start-client.ps1 -Mode Direct -InternetNgrok -Host <ngrok-host> -TcpPort <ngrok-port>
 ```
 
 ## Database schema can nho
@@ -206,7 +270,7 @@ powershell -ExecutionPolicy Bypass -File .\local\setup\scenario-1-local.ps1
 - `Users`: tai khoan.
 - `Rooms`: room metadata, `room_code`, `owner_id`, `owner_server_id`, canvas size, max members.
 - `DrawHistory`: stroke replay cho client vao sau.
-- `ChatHistory`, `Gallery`, `AiResults`, `Snapshots`, `PixelArtCells` cho chat, gallery, AI, snapshot backend va pixel art.
+- `ChatHistory`, `Gallery`, `AiResults`, `PixelArtCells` cho chat, gallery, AI va pixel art.
 - `ServerNodes`: heartbeat backend.
 - `RoomEvents`: cross-server events va notify payload.
 - Cac bang da loai bo khoi schema cloud ngay 2026-05-25 vi rong/khong con active code dung: `RoomMembers`, `StickyNotes`, `StickyNoteReplies`, `Stickers`, `ClientRateLimits`, `GifExports`.
@@ -214,25 +278,25 @@ powershell -ExecutionPolicy Bypass -File .\local\setup\scenario-1-local.ps1
 ## Tinh nang chinh
 
 - Canvas GDI+, free draw, shape, eraser, color/thickness/background mau hoac anh, zoom local; viewport canvas co dinh 1920x1080, zoom-out toi da se cover khung nhin thay de moi diem dang thay deu ve duoc. Rectangle/Circle giu `Shift` de ve square/perfect circle.
-- Flood fill BFS, text tool, import image, sticker, sticky note, claim area.
+- Flood fill BFS, text tool, import image, sticker, sticky note.
 - Chat, member list, user join/leave, sync board replay, undo/redo theo action gan nhat cua chinh user.
-- Cursor/laser realtime: UDP local/direct khi co endpoint, TCP fallback qua relay/ngrok; reaction da bo khoi scope.
-- Turn-based drawing co owner control va auto-advance khi user roi phong.
+- Cursor realtime: UDP local/direct khi co endpoint, TCP fallback qua relay/ngrok; laser va reaction da bo khoi scope.
+- Turn-based drawing: chu phong bat/tat, chi user dang giu luot duoc chuyen sang luot ke tiep, server tu chuyen luot khi user dang cam luot roi phong.
 - AI Hugging Face Stable Diffusion text-to-image va Remove.bg; server sync/replay ket qua AI. Tinh nang hoan thien/goi y prompt da bi loai khoi scope.
 - Gallery/save/export anh tinh khong watermark theo quyet dinh moi; GIF export da bo khoi scope va khong con UI/protocol/service.
 - Pixel art la tinh nang to mau cong tac theo tung pixel, user chot tich hop vao canvas voi grid 64x64; hien co payload/server storage, UI/grid/rate-limit chua hoan chinh.
 
 ## Backlog va rui ro
 
-- User can demo that 3 client/2 server/LB/ngrok/Neon de xac nhan latency muc tieu 0.3-0.5s.
-- Theo `local/features.md`, cac tinh nang dang `❌` can trien khai theo quyet dinh moi: spectator chi xem/chat, khoa vung ve enforce server + client render/chan som, pixel art UI 64x64 tich hop canvas. Undo/redo cua chinh user va Shift-square/circle da lam; GIF export, sticker rotate UI, sticky note replies va snapshot UI don gian da bo khoi scope.
+- User can demo that 3 client/2 server/LB/ngrok/Neon de xac nhan latency. Internet ngrok chi TCP nen nghiem thu cursor theo TCP fallback; UDP proxy qua LB chi can nghiem thu local/LAN.
+- Theo `local/features.md`, cac tinh nang dang `❌` can trien khai theo quyet dinh moi: spectator chi xem/chat, pixel art UI 64x64 tich hop canvas. Undo/redo cua chinh user, Shift-square/circle va turn-based chuyen luot theo active user da lam; GIF export, sticker rotate UI, sticky note replies, snapshot tu dong/UI/backend va khoa vung ve da bo khoi scope.
 - Cac tinh nang da bo khoi scope: reaction, watermark export/gallery, thay doi/sync canvas size.
-- Cac tinh nang dang `⚠️`/can demo hoac polish: follow viewport pan+zoom, turn-based UX 2 client, snapshot backend/timeline, AI voi key that, ngrok/Tailscale demo.
+- Cac tinh nang dang `⚠️`/can demo hoac polish: follow viewport pan+zoom, turn-based UX 2 client, AI voi key that, ngrok/Tailscale demo.
 - Cross-server sync chi nen la fallback; khong phu hop cho net ve lien tuc neu can latency thap.
 
 ## Quyet dinh user da chot 2026-05-25
 
-- Khoa vung ve: Codex chon phuong an hop ly; mac dinh nen enforce tren server, client render/chan som.
+- Khoa vung ve: da bo khoi scope ngay 2026-05-26; khong con UI/protocol/payload/handler claim area.
 - Observer: chi xem va chat; bo reaction.
 - Undo/redo: chi action cua chinh user; da implement theo `ActionID`/`Username`, moi lan keo pen la 1 action.
 - GIF export: da bo hoan toan khoi scope hien tai; khong con UI, protocol, service, payload, test hay schema lien quan.
@@ -240,7 +304,7 @@ powershell -ExecutionPolicy Bypass -File .\local\setup\scenario-1-local.ps1
 - Watermark: bo hoan toan khi export/gallery.
 - Sticker rotate: da bo khoi scope; khong can UI xoay.
 - Canvas size: co dinh trong moi room; moi user zoom local theo y muon.
-- Snapshot UI don gian: da bo khoi scope hien tai theo yeu cau moi; khong can bo sung UI xem/chon snapshot.
+- Snapshot tu dong/UI/backend: da bo khoi scope ngay 2026-05-26; khong con service, protocol, DB API hay bang `Snapshots` tren Neon.
 
 ## Quy tac lam viec tiep
 

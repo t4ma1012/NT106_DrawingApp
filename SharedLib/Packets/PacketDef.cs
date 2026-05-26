@@ -1,7 +1,7 @@
-﻿// ============================================================
+// ============================================================
 // SharedLib/Packets/PacketDef.cs
-// PacketDef v6 FINAL — Person B (Network)
-// Bao gồm tất cả CommandType từ Tuần 1 → Tuần 6
+// PacketDef v6 FINAL � Person B (Network)
+// Bao g?m t?t c? CommandType t? Tu?n 1 ? Tu?n 6
 // ============================================================
 using System;
 using System.Text;
@@ -9,99 +9,90 @@ using System.Text;
 namespace SharedLib.Packets
 {
     /// <summary>
-    /// Toàn bộ command types cho giao thức NT106 Drawing App.
+    /// To�n b? command types cho giao th?c NT106 Drawing App.
     /// TCP: Auth, Room, Sync, Undo, Chat, Gallery, Security, AI
-    /// UDP: Draw, Cursor, Laser, Reaction, Spotlight, PixelArt
+    /// UDP: Draw, Cursor, Reaction, Spotlight, PixelArt
     /// </summary>
     public enum CommandType : byte
     {
-        // ── AUTH (TCP) ──────────────────────────────────────────
+        // -- AUTH (TCP) ------------------------------------------
         LOGIN = 0x01,
         REGISTER = 0x02,
         LOGIN_RESPONSE = 0x03,
         REGISTER_RESPONSE = 0x04,
 
-        // ── ROOM MANAGEMENT (TCP) ───────────────────────────────
+        // -- ROOM MANAGEMENT (TCP) -------------------------------
         CREATE_ROOM = 0x10,
         CREATE_ROOM_RESPONSE = 0x11,
         JOIN_ROOM = 0x12,
         JOIN_ROOM_RESPONSE = 0x13,
         LEAVE_ROOM = 0x14,
 
-        // ── ROOM INFO (TCP broadcast) ───────────────────────────
+        // -- ROOM INFO (TCP broadcast) ---------------------------
         ROOM_MEMBERS = 0x20,
         USER_JOIN = 0x21,
         USER_LEAVE = 0x22,
 
-        // ── DRAWING (UDP) ───────────────────────────────────────
+        // -- DRAWING (UDP) ---------------------------------------
         DRAW = 0x30,
         FLOOD_FILL = 0x31,
         TEXT = 0x32,
         SPRAY = 0x33,
         IMPORT_IMAGE = 0x34,
         SET_BACKGROUND = 0x35,
-        CLEAR_ALL = 0x36,     // Tuần 1 — broadcast xóa canvas
+        CLEAR_ALL = 0x36,     // Tu?n 1 � broadcast x�a canvas
 
-        // ── SYNC (TCP) ──────────────────────────────────────────
+        // -- SYNC (TCP) ------------------------------------------
         SYNC_BOARD = 0x40,
         CANVAS_SIZE = 0x41,
 
-        // ── UNDO / REDO (TCP) ───────────────────────────────────
+        // -- UNDO / REDO (TCP) -----------------------------------
         UNDO = 0x50,
         REDO = 0x51,
 
-        // ── INTERACTION (TCP/UDP) ───────────────────────────────
+        // -- INTERACTION (TCP/UDP) -------------------------------
         CHAT = 0x60,     // TCP
         REACTION = 0x61,     // UDP
         CURSOR = 0x62,     // UDP/TCP real-time
-        LASER = 0x63,     // UDP/TCP real-time
+        LASER = 0x63,     // legacy disabled
         ACTIVITY_LOG = 0x64,     // TCP
         UDP_PING = 0x65,     // UDP endpoint registration
-
-        // ── AREA CLAIM (TCP) ────────────────────────────────────
-        CLAIM_AREA = 0x70,
-        RELEASE_AREA = 0x71,
-        EXTEND_CLAIM = 0x72,
-        AREA_RELEASED = 0x73,
-
-        // ── FEATURES (TCP) ──────────────────────────────────────
+        // -- FEATURES (TCP) --------------------------------------
         SET_TURNBASED = 0x80,
         TURN_CHANGE = 0x81,
         REQUEST_PLAYBACK = 0x82,
         PLAYBACK_RESPONSE = 0x83,
 
-        // ── GALLERY (TCP) ───────────────────────────────────────
+        // -- GALLERY (TCP) ---------------------------------------
         SAVE_TO_GALLERY = 0x90,
         GET_GALLERY = 0x91,
         GALLERY_RESPONSE = 0x92,
-        PUBLIC_GALLERY_LINK = 0x93,     // Tuần 7 — public link
+        PUBLIC_GALLERY_LINK = 0x93,     // Tu?n 7 � public link
 
-        // ── AI FEATURES (TCP) ── Tuần 5-6 ──────────────────────
-        AI_TEXT_TO_IMAGE = 0xA0,     // Tuần 5
-        AI_BG_REMOVED = 0xA1,     // Tuần 5
+        // -- AI FEATURES (TCP) -- Tu?n 5-6 ----------------------
+        AI_TEXT_TO_IMAGE = 0xA0,     // Tu?n 5
+        AI_BG_REMOVED = 0xA1,     // Tu?n 5
 
-        // ── ADVANCED FEATURES (TCP/UDP) ── Tuần 5-8 ────────────
-        STICKER = 0xB0,     // Tuần 5 — Sticker & Shape Library
-        FOLLOW_MODE = 0xB1,     // Tuần 5 — Follow another user
-        SPOTLIGHT = 0xB2,     // Tuần 5 — UDP
-        STICKY_NOTE = 0xB3,     // Tuần 5 — Sticky note/comment
-        STICKY_NOTE_REPLY = 0xB4,     // Tuần 5
-        TIMELINE_REQUEST = 0xB7,     // Tuần 6 — Time travel
-        TIMELINE_RESPONSE = 0xB8,     // Tuần 6
-        SNAPSHOT_LIST = 0xB9,     // Tuần 6
-        SNAPSHOT_RESTORE = 0xBA,     // Tuần 6
+        // -- ADVANCED FEATURES (TCP/UDP) -- Tu?n 5-8 ------------
+        STICKER = 0xB0,     // Tu?n 5 � Sticker & Shape Library
+        FOLLOW_MODE = 0xB1,     // Tu?n 5 � Follow another user
+        SPOTLIGHT = 0xB2,     // Tu?n 5 � UDP
+        STICKY_NOTE = 0xB3,     // Tu?n 5 � Sticky note/comment
+        STICKY_NOTE_REPLY = 0xB4,     // Tu?n 5
+        TIMELINE_REQUEST = 0xB7,     // Tu?n 6 � Time travel
+        TIMELINE_RESPONSE = 0xB8,     // Tu?n 6
 
-        // ── PIXEL ART (TCP/UDP) ────────────────────────────────
+        // -- PIXEL ART (TCP/UDP) --------------------------------
         PIXEL_ART_DRAW = 0xC3,     // UDP
         PIXEL_ART_SYNC = 0xC4,     // TCP
 
-        // ── SYSTEM ──────────────────────────────────────────────
+        // -- SYSTEM ----------------------------------------------
         HEARTBEAT = 0xF0,
         DISCONNECT = 0xFF
     }
 
     /// <summary>
-    /// Cấu trúc packet: [Header=0xFF(1B)] [Cmd(1B)] [Length(4B, big-endian)] [Payload(N bytes, UTF-8 JSON)]
+    /// C?u tr�c packet: [Header=0xFF(1B)] [Cmd(1B)] [Length(4B, big-endian)] [Payload(N bytes, UTF-8 JSON)]
     /// </summary>
     public class Packet
     {
@@ -111,7 +102,7 @@ namespace SharedLib.Packets
         public CommandType Cmd { get; set; }
         public byte[] Payload { get; set; } = Array.Empty<byte>();
 
-        /// <summary>Chuyển Packet thành byte[] để gửi qua socket.</summary>
+        /// <summary>Chuy?n Packet th�nh byte[] d? g?i qua socket.</summary>
         public byte[] Serialize()
         {
             int payloadLen = Payload?.Length ?? 0;
@@ -129,17 +120,17 @@ namespace SharedLib.Packets
             return result;
         }
 
-        /// <summary>Phân tích byte[] nhận từ socket thành Packet.</summary>
+        /// <summary>Ph�n t�ch byte[] nh?n t? socket th�nh Packet.</summary>
         public static Packet Deserialize(byte[] data)
         {
             if (data == null || data.Length < 6)
-                throw new ArgumentException("Dữ liệu packet quá ngắn.");
+                throw new ArgumentException("D? li?u packet qu� ng?n.");
             if (data[0] != HEADER_BYTE)
-                throw new ArgumentException($"Header không hợp lệ: 0x{data[0]:X2}");
+                throw new ArgumentException($"Header kh�ng h?p l?: 0x{data[0]:X2}");
 
             int payloadLen = (data[2] << 24) | (data[3] << 16) | (data[4] << 8) | data[5];
             if (data.Length < 6 + payloadLen)
-                throw new ArgumentException("Payload bị cắt ngắn.");
+                throw new ArgumentException("Payload b? c?t ng?n.");
 
             byte[] payload = new byte[payloadLen];
             if (payloadLen > 0)

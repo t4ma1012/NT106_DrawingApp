@@ -16,7 +16,42 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
         }
 
         // Nhớ kiểm tra lại mật khẩu Database của bạn (đang để mặc định là 123456)
-        private static string connString => EnvLoader.GetRequired("DATABASE_URL");
+        private static string connString => PostgresConnectionString.Normalize(EnvLoader.GetRequired("DATABASE_URL"));
+
+        internal static async Task<bool> SaveStrokeRecordAsync(string roomCode, string actionId, string strokeData, string username)
+        {
+            try
+            {
+                using var conn = new NpgsqlConnection(connString);
+                await conn.OpenAsync();
+
+                using var cmdInsert = new NpgsqlCommand(
+                    @"INSERT INTO DrawHistory (room_id, action_id, stroke_data, username)
+                      SELECT r.id, @a, @s::jsonb, @u
+                      FROM Rooms r
+                      WHERE r.room_code = @c",
+                    conn);
+                cmdInsert.Parameters.AddWithValue("c", roomCode);
+                cmdInsert.Parameters.AddWithValue("a", actionId ?? Guid.NewGuid().ToString());
+                cmdInsert.Parameters.AddWithValue("s", strokeData ?? "{}");
+                cmdInsert.Parameters.AddWithValue("u", username ?? "");
+
+                int rows = await cmdInsert.ExecuteNonQueryAsync();
+                if (rows <= 0)
+                {
+                    Logger.Error("DB", $"[SAVE ERROR] Khong tim thay phong room_code='{roomCode}'");
+                    return false;
+                }
+
+                Logger.Info("DB", $"[SAVE] stroke room={roomCode} action={actionId}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("DB", $"[SAVE ERROR] room={roomCode} action={actionId} err={ex.Message}");
+                return false;
+            }
+        }
 
         private static string ComputeSha256Hash(string rawData)
         {
@@ -164,7 +199,7 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
                 }
                 int roomId = Convert.ToInt32(roomIdObj);
 
-                using var cmdInsert = new NpgsqlCommand("INSERT INTO DrawHistory (room_id, action_id, stroke_data, username) VALUES (@r, @a::uuid, @s::jsonb, @u)", conn);
+                using var cmdInsert = new NpgsqlCommand("INSERT INTO DrawHistory (room_id, action_id, stroke_data, username) VALUES (@r, @a, @s::jsonb, @u)", conn);
                 cmdInsert.Parameters.AddWithValue("r", roomId);
                 cmdInsert.Parameters.AddWithValue("a", actionId);
                 cmdInsert.Parameters.AddWithValue("s", strokeData);
@@ -202,6 +237,7 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
                 using var reader = await cmd.ExecuteReaderAsync();
                 while (await reader.ReadAsync())
                     history.Add(reader.GetString(0));
+                history.AddRange(StrokePersistenceQueue.GetPendingStrokeJson(roomCode));
 
                 SharedLib.Logging.Logger.Info("DB", $"[HISTORY] room={roomCode} → {history.Count} strokes");
             }
@@ -781,91 +817,6 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
             catch (Exception ex)
             {
                 Logger.Warning("DB", $"ClearPixelBoardAsync lỗi: {ex.Message}");
-            }
-        }
-
-        // ── SNAPSHOT ───────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Lưu 1 snapshot (toàn bộ DrawHistory tại thời điểm này dưới dạng JSON gộp).
-        /// Bảng: Snapshots(id, room_id, snapshot_data JSONB, thumbnail TEXT, taken_at TIMESTAMPTZ)
-        /// </summary>
-        public static async Task<int> SaveSnapshotAsync(string roomCode, string snapshotJson, string thumbnailBase64 = "")
-        {
-            try
-            {
-                using var conn = new NpgsqlConnection(connString);
-                await conn.OpenAsync();
-
-                using var cmdRoom = new NpgsqlCommand("SELECT id FROM Rooms WHERE room_code = @c", conn);
-                cmdRoom.Parameters.AddWithValue("c", roomCode);
-                var roomId = await cmdRoom.ExecuteScalarAsync() as int?;
-                if (roomId == null) return 0;
-
-                using var cmd = new NpgsqlCommand(
-                    @"INSERT INTO Snapshots (room_id, snapshot_data, thumbnail, taken_at)
-                      VALUES (@r, @d::jsonb, @t, NOW()) RETURNING id",
-                    conn);
-                cmd.Parameters.AddWithValue("r", roomId);
-                cmd.Parameters.AddWithValue("d", snapshotJson);
-                cmd.Parameters.AddWithValue("t", thumbnailBase64);
-
-                var result = await cmd.ExecuteScalarAsync();
-                return result != null ? Convert.ToInt32(result) : 0;
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning("DB", $"SaveSnapshotAsync lỗi: {ex.Message}");
-                return 0;
-            }
-        }
-
-        /// <summary>Lấy danh sách snapshot của phòng (không kèm data lớn, chỉ meta + thumbnail).</summary>
-        public static async Task<List<(int Id, DateTime TakenAt, string Thumbnail)>> GetSnapshotListAsync(string roomCode)
-        {
-            var list = new List<(int, DateTime, string)>();
-            try
-            {
-                using var conn = new NpgsqlConnection(connString);
-                await conn.OpenAsync();
-
-                using var cmdRoom = new NpgsqlCommand("SELECT id FROM Rooms WHERE room_code = @c", conn);
-                cmdRoom.Parameters.AddWithValue("c", roomCode);
-                var roomId = await cmdRoom.ExecuteScalarAsync() as int?;
-                if (roomId == null) return list;
-
-                using var cmd = new NpgsqlCommand(
-                    "SELECT id, taken_at, thumbnail FROM Snapshots WHERE room_id = @r ORDER BY taken_at DESC",
-                    conn);
-                cmd.Parameters.AddWithValue("r", roomId);
-                using var reader = await cmd.ExecuteReaderAsync();
-                while (await reader.ReadAsync())
-                    list.Add((reader.GetInt32(0), reader.GetDateTime(1), reader.IsDBNull(2) ? "" : reader.GetString(2)));
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning("DB", $"GetSnapshotListAsync lỗi: {ex.Message}");
-            }
-            return list;
-        }
-
-        /// <summary>Lấy toàn bộ stroke_data của 1 snapshot theo id.</summary>
-        public static async Task<string> GetSnapshotDataAsync(int snapshotId)
-        {
-            try
-            {
-                using var conn = new NpgsqlConnection(connString);
-                await conn.OpenAsync();
-
-                using var cmd = new NpgsqlCommand("SELECT snapshot_data FROM Snapshots WHERE id = @id", conn);
-                cmd.Parameters.AddWithValue("id", snapshotId);
-                var result = await cmd.ExecuteScalarAsync();
-                return result?.ToString() ?? "";
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning("DB", $"GetSnapshotDataAsync lỗi: {ex.Message}");
-                return "";
             }
         }
 

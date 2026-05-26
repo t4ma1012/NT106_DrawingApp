@@ -22,6 +22,7 @@ namespace DrawingServer.Services
         private static NpgsqlConnection? _listenConn;
         private static CancellationTokenSource? _cts;
         private static volatile bool _started;
+        private static readonly SemaphoreSlim PublishLock = new SemaphoreSlim(1, 1);
 
         private sealed class NotifyPayload
         {
@@ -37,7 +38,7 @@ namespace DrawingServer.Services
             if (_started)
                 return;
 
-            _connString = EnvLoader.Get("DATABASE_URL", "");
+            _connString = PostgresConnectionString.Normalize(EnvLoader.Get("DATABASE_URL", ""));
             _serverId = EnvLoader.Get("SERVER_ID", "server-1");
             if (string.IsNullOrWhiteSpace(_connString))
             {
@@ -75,6 +76,7 @@ namespace DrawingServer.Services
             };
             string notifyJson = JsonConvert.SerializeObject(notify);
 
+            await PublishLock.WaitAsync();
             try
             {
                 using var conn = new NpgsqlConnection(_connString);
@@ -100,6 +102,10 @@ SELECT pg_notify(@channel, @notify_payload);";
             catch (Exception ex)
             {
                 Logger.Warning("CrossSync", $"Publish failed: {ex.Message}");
+            }
+            finally
+            {
+                PublishLock.Release();
             }
         }
 

@@ -85,11 +85,6 @@ namespace DrawingClient.Network
                     NetworkEvents.RaiseCursorReceived(cursor);
                     break;
 
-                case CommandType.LASER:
-                    var laser = PacketHelper.GetPayload<LaserPayload>(packet);
-                    NetworkEvents.RaiseLaserReceived(laser);
-                    break;
-
                 case CommandType.REACTION:
                     var reaction = PacketHelper.GetPayload<ReactionPayload>(packet);
                     NetworkEvents.RaiseReactionReceived(reaction);

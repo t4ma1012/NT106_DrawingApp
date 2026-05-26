@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Drawing;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using DrawingClient.Network;
 using SharedLib.Config;
@@ -14,6 +15,8 @@ namespace DrawingClient.Forms
         private TextBox txtPassword;
         private TextBox txtServer;
         private Label lblStatus;
+        private Button btnLogin;
+        private Button btnRegister;
 
         public LoginForm()
         {
@@ -45,7 +48,9 @@ namespace DrawingClient.Forms
             {
                 Location = new Point(120, 60),
                 Width = 250,
-                Text = EnvLoader.Get("LOAD_BALANCER_HOST", "127.0.0.1")
+                Text = EnvLoader.Get("USE_LOAD_BALANCER_ROUTING", "1") == "0"
+                    ? EnvLoader.Get("SERVER_PUBLIC_HOST", "127.0.0.1")
+                    : EnvLoader.Get("LOAD_BALANCER_HOST", "127.0.0.1")
             };
 
             Label lblUser = new Label { Text = "Tài khoản:", AutoSize = true, Location = new Point(20, 102) };
@@ -54,7 +59,7 @@ namespace DrawingClient.Forms
             Label lblPass = new Label { Text = "Mật khẩu:", AutoSize = true, Location = new Point(20, 139) };
             txtPassword = new TextBox { Location = new Point(120, 134), Width = 250, UseSystemPasswordChar = true };
 
-            Button btnLogin = new Button
+            btnLogin = new Button
             {
                 Text = "Đăng nhập",
                 Location = new Point(120, 178),
@@ -62,18 +67,26 @@ namespace DrawingClient.Forms
             };
             btnLogin.Click += BtnLogin_Click;
 
-            Button btnRegister = new Button
+            btnRegister = new Button
             {
                 Text = "Đăng ký",
                 Location = new Point(250, 178),
                 Size = new Size(120, 34)
             };
-            btnRegister.Click += (s, e) =>
+            btnRegister.Click += async (s, e) =>
             {
-                if (!EnsureConnected())
-                    return;
+                SetAuthButtonsEnabled(false);
+                try
+                {
+                    if (!await EnsureConnectedAsync())
+                        return;
 
-                _network.SendRegister(txtUsername.Text.Trim(), txtPassword.Text);
+                    _network.SendRegister(txtUsername.Text.Trim(), txtPassword.Text);
+                }
+                finally
+                {
+                    SetAuthButtonsEnabled(true);
+                }
             };
 
             lblStatus = new Label
@@ -112,7 +125,7 @@ namespace DrawingClient.Forms
             NetworkEvents.OnDisconnected -= NetworkEvents_OnDisconnected;
         }
 
-        private void BtnLogin_Click(object sender, EventArgs e)
+        private async void BtnLogin_Click(object sender, EventArgs e)
         {
             string username = txtUsername.Text?.Trim();
             string password = txtPassword.Text ?? string.Empty;
@@ -123,14 +136,22 @@ namespace DrawingClient.Forms
                 return;
             }
 
-            if (!EnsureConnected())
-                return;
+            SetAuthButtonsEnabled(false);
+            try
+            {
+                if (!await EnsureConnectedAsync())
+                    return;
 
-            lblStatus.Text = "Trang gửi thông tin xác thực...";
-            _network.SendLogin(username, password);
+                lblStatus.Text = "Đang gửi thông tin xác thực...";
+                _network.SendLogin(username, password);
+            }
+            finally
+            {
+                SetAuthButtonsEnabled(true);
+            }
         }
 
-        private bool EnsureConnected()
+        private async Task<bool> EnsureConnectedAsync()
         {
             if (_network.IsConnected)
                 return true;
@@ -140,21 +161,26 @@ namespace DrawingClient.Forms
                 serverIp = "127.0.0.1";
 
             int lbPort = EnvLoader.GetInt("LOAD_BALANCER_PORT", 9000);
+            int lbUdpPort = EnvLoader.GetInt("LOAD_BALANCER_UDP_PORT", 9001);
             int directTcpPort = EnvLoader.GetInt("SERVER_TCP_PORT", 8888);
             int directUdpPort = EnvLoader.GetInt("SERVER_UDP_PORT", 8889);
             string lbMode = EnvLoader.Get("LOAD_BALANCER_CLIENT_MODE", "relay").Trim().ToLowerInvariant();
             bool useLoadBalancer = EnvLoader.Get("USE_LOAD_BALANCER_ROUTING", "1") != "0";
+            bool useLbUdpProxy = EnvLoader.Get("LOAD_BALANCER_UDP_PROXY", "0") == "1";
+            bool allowDirectFallback = EnvLoader.Get("CLIENT_ALLOW_DIRECT_FALLBACK", "0") == "1";
+            bool forceTcpRealtime = EnvLoader.Get("CLIENT_FORCE_TCP_REALTIME", "0") == "1";
 
             bool connected = false;
-            _network.PreferTcpRealtime = false;
+            _network.PreferTcpRealtime = forceTcpRealtime;
+            lblStatus.Text = "Đang kết nối...";
 
             if (useLoadBalancer && lbMode == "direct")
             {
                 try
                 {
-                    var route = LoadBalancerRouteClient.ResolveAsync(serverIp, lbPort).GetAwaiter().GetResult();
+                    var route = await LoadBalancerRouteClient.ResolveAsync(serverIp, lbPort);
                     _network.SetAssignedServer(route.Host, route.TcpPort, route.UdpPort);
-                    connected = _network.Connect(route.Host, route.TcpPort, true);
+                    connected = await Task.Run(() => _network.Connect(route.Host, route.TcpPort, true));
                     if (connected)
                         lblStatus.Text = $"Da route toi {route.ServerName} ({route.Host}:{route.TcpPort})";
                 }
@@ -165,18 +191,31 @@ namespace DrawingClient.Forms
             }
             else if (useLoadBalancer)
             {
-                _network.SetAssignedServer(serverIp, lbPort, 0);
-                _network.PreferTcpRealtime = true;
-                connected = _network.Connect(serverIp, lbPort, true);
+                string serverId = "";
+                try
+                {
+                    var route = await LoadBalancerRouteClient.ResolveAsync(serverIp, lbPort);
+                    serverId = route.ServerId ?? "";
+                }
+                catch
+                {
+                    serverId = "";
+                }
+
+                _network.SetAssignedServer(serverIp, lbPort, lbUdpPort, serverId);
+                _network.PreferTcpRealtime = !useLbUdpProxy;
+                connected = await Task.Run(() => _network.ConnectRelay(serverIp, lbPort, serverId));
                 if (connected)
-                    lblStatus.Text = $"Da ket noi LB relay {serverIp}:{lbPort}";
+                    lblStatus.Text = useLbUdpProxy
+                        ? $"Da ket noi LB relay {serverIp}:{lbPort}, UDP proxy {serverIp}:{lbUdpPort}"
+                        : $"Da ket noi LB relay {serverIp}:{lbPort}";
             }
 
-            if (!connected)
+            if (!connected && (!useLoadBalancer || allowDirectFallback))
             {
-                _network.PreferTcpRealtime = false;
+                _network.PreferTcpRealtime = forceTcpRealtime;
                 _network.SetAssignedServer(serverIp, directTcpPort, directUdpPort);
-                connected = _network.Connect(serverIp, directTcpPort, true);
+                connected = await Task.Run(() => _network.Connect(serverIp, directTcpPort, true));
             }
 
             if (!connected)
@@ -186,6 +225,12 @@ namespace DrawingClient.Forms
             }
 
             return true;
+        }
+
+        private void SetAuthButtonsEnabled(bool enabled)
+        {
+            if (btnLogin != null) btnLogin.Enabled = enabled;
+            if (btnRegister != null) btnRegister.Enabled = enabled;
         }
 
         private void NetworkEvents_OnLoginResponse(LoginResponse response)

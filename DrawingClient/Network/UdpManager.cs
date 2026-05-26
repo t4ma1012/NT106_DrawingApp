@@ -26,6 +26,7 @@ namespace DrawingClient.Network
         private Task _listenTask;
         private readonly string _serverIp;
         private readonly int _serverPort;
+        private readonly IPEndPoint _serverEndpoint;
         private bool _disposed = false;
 
         public int LocalPort { get; private set; }
@@ -34,6 +35,10 @@ namespace DrawingClient.Network
         {
             _serverIp = serverIp;
             _serverPort = serverPort;
+            IPAddress address;
+            if (!IPAddress.TryParse(serverIp, out address))
+                address = Dns.GetHostAddresses(serverIp)[0];
+            _serverEndpoint = new IPEndPoint(address, serverPort);
         }
 
         public void Start()
@@ -61,7 +66,7 @@ namespace DrawingClient.Network
                 byte[] payloadBytes = Encoding.UTF8.GetBytes(json);
                 Packet packet = new Packet { Cmd = cmd, Payload = payloadBytes };
                 byte[] encrypted = AesHelper.Encrypt(packet.Serialize());
-                _socket.Send(encrypted, encrypted.Length, _serverIp, _serverPort);
+                _socket.Send(encrypted, encrypted.Length, _serverEndpoint);
             }
             catch (Exception ex)
             {
@@ -78,10 +83,9 @@ namespace DrawingClient.Network
         public void SendTurnBased(TurnBasedPayload p) => SendPacket(CommandType.SET_TURNBASED, p);
         public void SendTurnChange(TurnBasedPayload p) => SendPacket(CommandType.TURN_CHANGE, p);
         public void SendCursor(CursorPayload p) => SendPacket(CommandType.CURSOR, p);
-        public void SendLaser(LaserPayload p) => SendPacket(CommandType.LASER, p);
         public void SendReaction(ReactionPayload p) => SendPacket(CommandType.REACTION, p);
 
-        public void RegisterEndpoint(string username, string roomCode)
+        public void RegisterEndpoint(string username, string roomCode, string serverId = "")
         {
             if (string.IsNullOrWhiteSpace(username))
                 return;
@@ -90,6 +94,7 @@ namespace DrawingClient.Network
             {
                 Username = username,
                 RoomCode = roomCode,
+                ServerId = serverId,
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             });
         }
@@ -149,10 +154,6 @@ namespace DrawingClient.Network
                     case CommandType.CURSOR:
                         NetworkEvents.RaiseCursorReceived(
                             JsonConvert.DeserializeObject<CursorPayload>(json));
-                        break;
-                    case CommandType.LASER:
-                        NetworkEvents.RaiseLaserReceived(
-                            JsonConvert.DeserializeObject<LaserPayload>(json));
                         break;
                     case CommandType.REACTION:
                         NetworkEvents.RaiseReactionReceived(

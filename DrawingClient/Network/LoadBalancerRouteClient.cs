@@ -37,11 +37,19 @@ namespace DrawingClient.Network
             await stream.FlushAsync();
 
             using var reader = new StreamReader(stream, Encoding.UTF8, false, 1024, true);
-            string line = await reader.ReadLineAsync();
+            var readTask = reader.ReadLineAsync();
+            if (await Task.WhenAny(readTask, Task.Delay(timeoutMs)) != readTask)
+                throw new TimeoutException("Timeout while waiting for load balancer route.");
+
+            string line = await readTask;
             if (string.IsNullOrWhiteSpace(line))
                 throw new InvalidOperationException("Load balancer returned empty route.");
 
             JObject json = JObject.Parse(line);
+            string error = json["error"]?.ToString() ?? "";
+            if (!string.IsNullOrWhiteSpace(error))
+                throw new InvalidOperationException($"Load balancer route error: {error}");
+
             return new ServerRouteInfo
             {
                 Host = json["host"]?.ToString() ?? "127.0.0.1",

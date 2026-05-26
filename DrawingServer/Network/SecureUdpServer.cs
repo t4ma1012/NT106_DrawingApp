@@ -45,7 +45,10 @@ namespace DrawingServer.Network
                 // Bước 1: Giải mã AES-256
                 byte[] decryptedBytes = AesHelper.Decrypt(result.Buffer);
                 Packet packet = Packet.Deserialize(decryptedBytes);
-                bool isPointerPacket = packet.Cmd == CommandType.CURSOR || packet.Cmd == CommandType.LASER;
+                if (packet.Cmd == CommandType.LASER)
+                    return;
+
+                bool isPointerPacket = packet.Cmd == CommandType.CURSOR;
 
                 string jsonPayload = PacketHelper.GetRawJson(packet);
                 JObject data = JObject.Parse(jsonPayload);
@@ -110,6 +113,15 @@ namespace DrawingServer.Network
                 if (!isPointerPacket)
                     Logger.Info("UDP", $"Broadcast [{packet.Cmd}] từ '{username}' trong phòng '{roomCode}'");
 
+                if (packet.Cmd == CommandType.CURSOR)
+                {
+                    data["Username"] = username;
+                    data["RoomCode"] = roomCode;
+                    if (data["Timestamp"] == null || data["Timestamp"]?.ToObject<long>() <= 0)
+                        data["Timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                    packet.Payload = System.Text.Encoding.UTF8.GetBytes(data.ToString(Newtonsoft.Json.Formatting.None));
+                }
+
                 if (packet.Cmd == CommandType.UDP_PING)
                 {
                     Logger.Info("UDP", $"[UDP_PING] Registered endpoint for '{username}' in room '{roomCode}'.");
@@ -123,6 +135,12 @@ namespace DrawingServer.Network
                     {
                         if (packet.Cmd == CommandType.SET_TURNBASED)
                         {
+                            if (!string.Equals(roomState.OwnerId, username, StringComparison.OrdinalIgnoreCase))
+                            {
+                                Logger.Warning("UDP", $"[TURN_BASED] Bo qua SET_TURNBASED tu '{username}': only room owner can toggle");
+                                return;
+                            }
+
                             bool isEnabled = data["IsEnabled"]?.ToObject<bool>() ?? false;
                             string activeUser = isEnabled ? (data["ActiveUser"]?.ToString() ?? username) : "";
                             roomState.IsTurnBasedEnabled = isEnabled;
@@ -173,7 +191,7 @@ namespace DrawingServer.Network
                 {
                     string rawActionId = data["ActionID"]?.ToString() ?? "";
                     string actionId = Guid.TryParse(rawActionId, out var parsedGuid) ? parsedGuid.ToString() : Guid.NewGuid().ToString();
-                    _ = Database.DbManager.SaveStrokeAsync(roomCode, actionId, jsonPayload, username);
+                    Database.StrokePersistenceQueue.Enqueue(roomCode, actionId, jsonPayload, username);
                     Logger.Info("UDP", $"[SAVE] Lưu stroke [{packet.Cmd}] ActionID={actionId} phòng {roomCode}");
                 }
 
@@ -181,7 +199,7 @@ namespace DrawingServer.Network
                 {
                     string rawActionId2 = data["ActionID"]?.ToString() ?? "";
                     string actionId = Guid.TryParse(rawActionId2, out var parsedGuid2) ? parsedGuid2.ToString() : Guid.NewGuid().ToString();
-                    _ = Database.DbManager.SaveStrokeAsync(roomCode, actionId, jsonPayload, username);
+                    Database.StrokePersistenceQueue.Enqueue(roomCode, actionId, jsonPayload, username);
                 }
                 else if (packet.Cmd == CommandType.PIXEL_ART_DRAW)
                 {
@@ -200,7 +218,7 @@ namespace DrawingServer.Network
                 byte[] encryptedResponse = AesHelper.Encrypt(packet.Serialize());
                 int sentCount = await BroadcastUdpAsync(encryptedResponse, roomCode, result.RemoteEndPoint, packet.Cmd);
                 int tcpFallbackCount = 0;
-                if (IsDrawingCommand(packet.Cmd) || packet.Cmd == CommandType.CHAT || packet.Cmd == CommandType.CURSOR || packet.Cmd == CommandType.LASER)
+                if (IsDrawingCommand(packet.Cmd) || packet.Cmd == CommandType.CHAT || packet.Cmd == CommandType.CURSOR)
                 {
                     tcpFallbackCount = await SecureTcpServer.BroadcastPacketToRoomWithoutUdpEndpointStaticAsync(
                         roomCode,
@@ -224,9 +242,9 @@ namespace DrawingServer.Network
         private async Task<int> BroadcastUdpAsync(byte[] encryptedData, string roomCode,
             IPEndPoint senderEndPoint, CommandType cmd)
         {
-            // Sender already applies local state. Skipping it keeps high-frequency cursor/laser packets light.
+            // Sender already applies local state. Skipping it keeps high-frequency cursor packets light.
             bool skipSender = true;
-            bool isPointerPacket = cmd == CommandType.CURSOR || cmd == CommandType.LASER;
+            bool isPointerPacket = cmd == CommandType.CURSOR;
             int count = 0;
 
             foreach (var kv in SecureTcpServer.Clients)

@@ -74,14 +74,6 @@ CREATE TABLE IF NOT EXISTS AiResults (
     created_by VARCHAR(50)
 );
 
-CREATE TABLE IF NOT EXISTS Snapshots (
-    id SERIAL PRIMARY KEY,
-    room_id INT REFERENCES Rooms(id) ON DELETE CASCADE,
-    snapshot_data JSONB NOT NULL,
-    thumbnail TEXT DEFAULT '',
-    taken_at TIMESTAMPTZ DEFAULT NOW()
-);
-
 CREATE TABLE IF NOT EXISTS PixelArtCells (
     room_id INT REFERENCES Rooms(id) ON DELETE CASCADE,
     row SMALLINT NOT NULL,
@@ -130,8 +122,6 @@ CREATE INDEX IF NOT EXISTS idx_chat_history_sent_at ON ChatHistory(sent_at);
 CREATE INDEX IF NOT EXISTS idx_action_stack_room_id ON ActionStack(room_id);
 CREATE INDEX IF NOT EXISTS idx_ai_results_room_id ON AiResults(room_id);
 CREATE INDEX IF NOT EXISTS idx_pixel_art_room_id ON PixelArtCells(room_id);
-CREATE INDEX IF NOT EXISTS idx_snapshots_room_id ON Snapshots(room_id);
-CREATE INDEX IF NOT EXISTS idx_snapshots_taken_at ON Snapshots(taken_at);
 CREATE INDEX IF NOT EXISTS idx_room_events_room_id_id ON RoomEvents(room_id, id);
 CREATE INDEX IF NOT EXISTS idx_room_events_event_type ON RoomEvents(event_type);
 

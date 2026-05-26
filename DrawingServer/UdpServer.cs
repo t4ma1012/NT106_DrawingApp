@@ -30,7 +30,6 @@ namespace DrawingServer
                     // Chỉ phát sóng nếu là lệnh vẽ/tương tác của Tuần 2
                     if (packet.Cmd == CommandType.DRAW ||
                         packet.Cmd == CommandType.CURSOR ||
-                        packet.Cmd == CommandType.LASER ||
                         packet.Cmd == CommandType.FLOOD_FILL ||
                         packet.Cmd == CommandType.TEXT ||
                         packet.Cmd == CommandType.REACTION)

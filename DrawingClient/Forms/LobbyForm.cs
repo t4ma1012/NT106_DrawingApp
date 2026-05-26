@@ -107,25 +107,26 @@ namespace DrawingClient.Forms
                 Action<JoinRoomResponse> onceHandler = null;
                 onceHandler = (resp) =>
                 {
+                    if (this.IsDisposed) return;
+                    if (this.IsHandleCreated && this.InvokeRequired)
+                    {
+                        this.BeginInvoke(new Action(() => onceHandler(resp)));
+                        return;
+                    }
+
                     NetworkEvents.OnJoinRoomResponse -= onceHandler;
                     if (resp != null && resp.IsSuccess)
                     {
                         pendingMainForm.SetRoomOwner(resp.IsRoomOwner);
                         pendingMainForm.RegisterUdpEndpoint();
-                        this.BeginInvoke(new Action(() =>
-                        {
-                            this.Hide();
-                            pendingMainForm.FormClosed += (fs, fe) => this.Close();
-                            pendingMainForm.Show();
-                        }));
+                        this.Hide();
+                        pendingMainForm.FormClosed += (fs, fe) => this.Close();
+                        pendingMainForm.Show();
                     }
                     else
                     {
-                        this.BeginInvoke(new Action(() =>
-                        {
-                            pendingMainForm.Dispose();
-                            lblStatus.Text = resp?.Message ?? "Không thể vào phòng";
-                        }));
+                        pendingMainForm.Dispose();
+                        lblStatus.Text = resp?.Message ?? "Không thể vào phòng";
                     }
                 };
                 NetworkEvents.OnJoinRoomResponse += onceHandler;
@@ -285,25 +286,26 @@ namespace DrawingClient.Forms
                 Action<JoinRoomResponse> onceHandler = null;
                 onceHandler = (resp) =>
                 {
+                    if (this.IsDisposed) return;
+                    if (this.IsHandleCreated && this.InvokeRequired)
+                    {
+                        this.BeginInvoke(new Action(() => onceHandler(resp)));
+                        return;
+                    }
+
                     NetworkEvents.OnJoinRoomResponse -= onceHandler;
                     if (resp != null && resp.IsSuccess)
                     {
                         pendingMainForm.SetRoomOwner(resp.IsRoomOwner);
                         pendingMainForm.RegisterUdpEndpoint();
-                        this.BeginInvoke(new Action(() =>
-                        {
-                            this.Hide();
-                            pendingMainForm.FormClosed += (fs, fe) => this.Close();
-                            pendingMainForm.Show();
-                        }));
+                        this.Hide();
+                        pendingMainForm.FormClosed += (fs, fe) => this.Close();
+                        pendingMainForm.Show();
                     }
                     else
                     {
-                        this.BeginInvoke(new Action(() =>
-                        {
-                            pendingMainForm.Dispose();
-                            lblStatus.Text = resp?.Message ?? "Không thể vào phòng";
-                        }));
+                        pendingMainForm.Dispose();
+                        lblStatus.Text = resp?.Message ?? "Không thể vào phòng";
                     }
                 };
                 NetworkEvents.OnJoinRoomResponse += onceHandler;

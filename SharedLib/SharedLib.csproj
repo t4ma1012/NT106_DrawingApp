@@ -48,12 +48,12 @@
     <Compile Include="AI\ApiConfig.cs" />
     <Compile Include="Class1.cs" />
     <Compile Include="Config\EnvLoader.cs" />
+    <Compile Include="Config\PostgresConnectionString.cs" />
     <Compile Include="Logging\Logger.cs" />
     <Compile Include="Packets\PacketDef.cs" />
     <Compile Include="Packets\PacketHelper.cs" />
     <Compile Include="Payloads\AiPayload.cs" />
     <Compile Include="Payloads\AuthPayload.cs" />
-    <Compile Include="Payloads\ClaimPayload.cs" />
     <Compile Include="Payloads\DrawPayload.cs" />
     <Compile Include="Payloads\GalleryPayload.cs" />
     <Compile Include="Payloads\PixelArtPayload.cs" />

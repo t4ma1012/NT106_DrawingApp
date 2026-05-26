@@ -71,7 +71,7 @@ Da lam:
 | `local/plan/plan.md` | `ACTIVE` | Workflow tong quan |
 | `local/plan/requirements.md` | `ACTIVE` | Yeu cau/quyet dinh da chot |
 | `local/plan/status_check.md` | `ACTIVE` | Bang dieu khien tien do |
-| `local/setup/setup.md` va `scenario-*.ps1` | `ACTIVE` | Huong dan/script demo |
+| `setup/` | `ACTIVE` | Goi setup duy nhat: exe build san, script role/scenario, README va checklist |
 
 ### UI toolbox/MainForm polish
 
@@ -106,7 +106,7 @@ Da lam:
 - Login client ho tro 2 mode:
   - `relay`: ket noi TCP vao LB/ngrok, khong nhan endpoint backend private.
   - `direct`: goi `ROUTE` de ket noi truc tiep backend, chi dung LAN/Tailnet.
-- Trong mode relay, draw/flood fill/text va cursor/laser gui qua TCP fallback.
+- Trong mode relay, draw/flood fill/text va cursor gui qua TCP fallback; laser da bo khoi scope.
 - Server TCP nhan/lui draw/flood fill/text, broadcast nhanh, luu DB nen va publish cross-server.
 - DrawingServer va LoadBalancer dung `Npgsql 8.0.9`.
 - Build solution sach warning.
@@ -130,7 +130,7 @@ Khi user xac nhan dat:
 
 - Cap nhat `local/done/07_tailscale_load_balancer_multi_server.md` sang `ACCEPTED` cho muc relay/TCP fallback.
 - Cap nhat `local/features.md` phan load balancer/network.
-- Cap nhat `local/setup/setup.md` neu topology demo thay doi.
+- Cap nhat `setup/README.md` va `setup/CHECKLIST.md` neu topology demo thay doi.
 
 ### Realtime drawing UDP sync
 
@@ -142,8 +142,8 @@ Da lam:
 - Server cap nhat endpoint moi khi nhan UDP tu client, nen restart/NAT doi port khong lam ket noi realtime bi ket.
 - Server xu ly `UDP_PING` nhu goi dang ky noi bo va khong broadcast sang client khac.
 - Neu client trong phong chua co UDP endpoint, server gui fallback qua TCP cho client do; khi endpoint da san sang, duong nhanh van la UDP.
-- Cursor/laser ngay 2026-05-25: `MainForm` gui TCP fallback khi `_udpManager` null hoac `PreferTcpRealtime=true`; `ClientNetwork` co send/receive `CURSOR`/`LASER`; `SecureTcpServer` broadcast cursor/laser trong room va khong luu DB; `SecureUdpServer` cung fallback TCP cho cursor/laser voi client chua co UDP endpoint.
-- Cursor/laser cap nhat tiep ngay 2026-05-25 cho direct/LAN tren mot may: `MainForm` khong con throttle 35ms trong UI thread; moi `MouseMove` chi cap nhat latest-state, timer nen flush `CURSOR`/`LASER` moi ~8ms qua UDP khi co `_udpManager`. `SecureUdpServer` bo log moi goi cursor/laser va khong echo pointer ve sender de giam latency/jitter.
+- Cursor cap nhat 2026-05-25 theo yeu cau moi: chi giu cursor, bo laser. `MainForm` gui TCP fallback khi `_udpManager` null hoac `PreferTcpRealtime=true`; `ClientNetwork` co send/receive `CURSOR`; `SecureTcpServer` broadcast cursor trong room va khong luu DB; `SecureUdpServer` cung fallback TCP cho cursor voi client chua co UDP endpoint va bo qua `LASER` legacy.
+- Cursor cap nhat tiep ngay 2026-05-25 cho direct/LAN va TCP fallback: `MainForm` khong con throttle 35ms trong UI thread; moi `MouseMove` chi cap nhat latest-state co `RoomCode` + `Timestamp`, timer nen flush `CURSOR` moi ~12ms qua UDP/TCP. Ben nhan gom latest cursor theo user va render bang timer UI ~15ms, bo packet cu hon theo `Timestamp` de tranh backlog UI; `UdpManager` cache endpoint server de tranh resolve host moi packet. `SecureUdpServer` bo log moi goi cursor, khong echo pointer ve sender va chuan hoa payload.
 - Text tool gui UDP command `TEXT` dung loai lenh thay vi di qua `DRAW`.
 - Client heartbeat doi thanh interval 15s, timeout 60s de khong tu ngat TCP sau mot khoang yen lang.
 - LoadBalancer relay mac dinh `LOAD_BALANCER_STRATEGY=room-affinity`: join room dung `ROUTE room=<roomCode>` + `RELAY server=<server_id>` de bam owner server; room moi/khong co owner route chon backend it tai hon.
@@ -160,7 +160,7 @@ User can chay thu:
 
 - Dong tat ca cua so scenario cu, build lai, roi chay lai `powershell -ExecutionPolicy Bypass -File .\local\setup\scenario-1-local.ps1`.
 - Mo 2 client cung room, ve pen/eraser/line/text lien tuc.
-- Di chuot tren canvas de xem cursor ten/cham cua client khac; giu Alt + di chuot de xem laser, nha Alt de xoa laser. Thu lai trong ca direct/LAN va LB relay/ngrok neu co.
+- Di chuot tren canvas de xem cursor ten/cham cua client khac. Thu lai trong ca direct/LAN va LB relay/ngrok neu co; laser da bo khoi scope.
 - Xac nhan client con lai thay net ve gan realtime va client vao sau van replay duoc history.
 
 ### AI Hugging Face Stable Diffusion va Remove.bg

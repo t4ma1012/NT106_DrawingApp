@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Security;
@@ -8,7 +9,11 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Npgsql;
+using SharedLib.Config;
+using SharedLib.Packets;
+using SharedLib.Security;
 
 namespace LoadBalancer
 {
@@ -28,8 +33,11 @@ namespace LoadBalancer
     public class DrawingLoadBalancer
     {
         private readonly List<ServerInfo> _servers = new List<ServerInfo>();
+        private readonly ConcurrentDictionary<string, string> _roomOwnerCache = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, UdpProxySession> _udpSessions = new Dictionary<string, UdpProxySession>();
         private readonly object _lock = new object();
         private TcpListener _listener;
+        private UdpClient _udpListener;
         public string RoutingStrategy { get; set; } = "room-affinity";
         public string DatabaseUrl { get; set; } = "";
 
@@ -55,18 +63,104 @@ namespace LoadBalancer
             Console.WriteLine($"[LB] Added {name} {host}:{tcpPort}/{udpPort}");
         }
 
-        public async Task StartAsync(int listenPort)
+        public async Task StartAsync(int listenPort, int udpPort)
         {
             _ = Task.Run(HealthCheckLoop);
+            _ = Task.Run(() => StartUdpProxyAsync(udpPort));
 
             _listener = new TcpListener(IPAddress.Any, listenPort);
             _listener.Start();
-            Console.WriteLine($"[LB] Listening on {listenPort}");
+            Console.WriteLine($"[LB] TCP listening on {listenPort}");
 
             while (true)
             {
                 TcpClient client = await _listener.AcceptTcpClientAsync();
                 _ = Task.Run(() => HandleClientAsync(client));
+            }
+        }
+
+        private async Task StartUdpProxyAsync(int udpPort)
+        {
+            _udpListener = new UdpClient(udpPort);
+            Console.WriteLine($"[LB] UDP proxy listening on {udpPort}");
+
+            while (true)
+            {
+                try
+                {
+                    UdpReceiveResult result = await _udpListener.ReceiveAsync();
+                    _ = Task.Run(() => HandleUdpFromClientAsync(result));
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[LB][UDP] receive error: {ex.Message}");
+                }
+            }
+        }
+
+        private async Task HandleUdpFromClientAsync(UdpReceiveResult result)
+        {
+            string key = result.RemoteEndPoint.ToString();
+            UdpProxySession session;
+
+            lock (_lock)
+            {
+                _udpSessions.TryGetValue(key, out session);
+            }
+
+            if (session == null)
+            {
+                string serverId = TryExtractUdpTargetServerId(result.Buffer);
+                ServerInfo target = SelectServerById(serverId) ?? SelectServer();
+                if (target == null)
+                    return;
+
+                session = new UdpProxySession(result.RemoteEndPoint, target, this);
+                lock (_lock)
+                {
+                    _udpSessions[key] = session;
+                }
+
+                session.StartReceiveLoop();
+                Console.WriteLine($"[LB][UDP] {result.RemoteEndPoint} -> {target.Name} ({target.Host}:{target.UdpPort})");
+            }
+
+            session.LastSeenUtc = DateTime.UtcNow;
+            await session.SendToServerAsync(result.Buffer);
+        }
+
+        internal async Task SendUdpToClientAsync(byte[] data, IPEndPoint clientEndPoint)
+        {
+            var listener = _udpListener;
+            if (listener == null)
+                return;
+
+            try
+            {
+                await listener.SendAsync(data, data.Length, clientEndPoint);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[LB][UDP] send to client {clientEndPoint} failed: {ex.Message}");
+            }
+        }
+
+        private static string TryExtractUdpTargetServerId(byte[] encryptedPacket)
+        {
+            try
+            {
+                byte[] decrypted = AesHelper.Decrypt(encryptedPacket);
+                Packet packet = Packet.Deserialize(decrypted);
+                if (packet.Payload == null || packet.Payload.Length == 0)
+                    return "";
+
+                string json = Encoding.UTF8.GetString(packet.Payload);
+                var obj = JObject.Parse(json);
+                return obj["ServerId"]?.ToString() ?? obj["serverId"]?.ToString() ?? "";
+            }
+            catch
+            {
+                return "";
             }
         }
 
@@ -224,12 +318,26 @@ namespace LoadBalancer
 
         private async Task<ServerInfo> SelectServerForRouteAsync(string roomCode)
         {
+            if (string.IsNullOrWhiteSpace(roomCode))
+                return SelectServer();
+
+            if (_roomOwnerCache.TryGetValue(roomCode.Trim(), out string cachedOwnerId))
+            {
+                ServerInfo cachedOwner = SelectServerById(cachedOwnerId);
+                if (cachedOwner != null)
+                    return cachedOwner;
+            }
+
             string ownerServerId = await GetRoomOwnerServerIdAsync(roomCode);
             ServerInfo owner = SelectServerById(ownerServerId);
             if (owner != null)
+            {
+                _roomOwnerCache[roomCode.Trim()] = owner.ServerId;
                 return owner;
+            }
 
-            return SelectServer();
+            Console.WriteLine($"[LB] ROUTE room={roomCode} blocked: owner server is unknown or unhealthy");
+            return null;
         }
 
         private async Task<string> GetRoomOwnerServerIdAsync(string roomCode)
@@ -239,7 +347,7 @@ namespace LoadBalancer
 
             try
             {
-                using var conn = new NpgsqlConnection(NormalizeNpgsqlConnectionString(DatabaseUrl));
+                using var conn = new NpgsqlConnection(PostgresConnectionString.Normalize(DatabaseUrl));
                 await conn.OpenAsync();
 
                 using var cmd = new NpgsqlCommand(
@@ -254,19 +362,6 @@ namespace LoadBalancer
                 Console.WriteLine($"[LB] Room owner lookup failed for {roomCode}: {ex.Message}");
                 return "";
             }
-        }
-
-        private static string NormalizeNpgsqlConnectionString(string connectionString)
-        {
-            if (string.IsNullOrWhiteSpace(connectionString))
-                return "";
-
-            string normalized = connectionString.Trim();
-            normalized = normalized.Replace("SslMode=", "SSL Mode=");
-            normalized = normalized.Replace("sslmode=", "SSL Mode=");
-            normalized = normalized.Replace("Ssl Mode=", "SSL Mode=");
-            normalized = normalized.Replace("TrustServerCertificate=", "Trust Server Certificate=");
-            return normalized;
         }
 
         private static async Task<string> ReadAsciiLineAsync(NetworkStream stream, string initialText, int maxChars)
@@ -420,6 +515,48 @@ namespace LoadBalancer
             catch
             {
                 return false;
+            }
+        }
+
+        private sealed class UdpProxySession
+        {
+            private readonly UdpClient _serverSocket;
+            private readonly IPEndPoint _serverEndPoint;
+            private readonly IPEndPoint _clientEndPoint;
+            private readonly DrawingLoadBalancer _owner;
+
+            public DateTime LastSeenUtc { get; set; } = DateTime.UtcNow;
+
+            public UdpProxySession(IPEndPoint clientEndPoint, ServerInfo server, DrawingLoadBalancer owner)
+            {
+                _clientEndPoint = clientEndPoint;
+                _serverEndPoint = new IPEndPoint(Dns.GetHostAddresses(server.Host)[0], server.UdpPort);
+                _owner = owner;
+                _serverSocket = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
+            }
+
+            public void StartReceiveLoop()
+            {
+                _ = Task.Run(async () =>
+                {
+                    while (true)
+                    {
+                        try
+                        {
+                            UdpReceiveResult response = await _serverSocket.ReceiveAsync();
+                            await _owner.SendUdpToClientAsync(response.Buffer, _clientEndPoint);
+                        }
+                        catch
+                        {
+                            break;
+                        }
+                    }
+                });
+            }
+
+            public Task SendToServerAsync(byte[] data)
+            {
+                return _serverSocket.SendAsync(data, data.Length, _serverEndPoint);
             }
         }
     }

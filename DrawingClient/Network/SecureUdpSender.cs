@@ -41,9 +41,6 @@ namespace DrawingClient.Network
         public void SendCursor(CursorPayload payload)
             => SendEncrypted(CommandType.CURSOR, payload);
 
-        public void SendLaser(LaserPayload payload)
-            => SendEncrypted(CommandType.LASER, payload);
-
         public void SendReaction(ReactionPayload payload)
             => SendEncrypted(CommandType.REACTION, payload);
 

@@ -181,9 +181,9 @@ namespace DrawingServer.Services
                     return false;
                 }
 
-                if (!string.Equals(room.OwnerId, requestedBy, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(room.ActiveDrawingUser, requestedBy, StringComparison.OrdinalIgnoreCase))
                 {
-                    message = "Only the room owner can change turns";
+                    message = "Only the active turn user can change turns";
                     return false;
                 }
 

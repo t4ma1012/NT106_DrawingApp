@@ -1,6 +1,6 @@
 ﻿// ============================================================
 // SharedLib/Payloads/InteractionPayload.cs
-// Tất cả payload tương tác: cursor, laser, emoji, chat, log,
+// Tất cả payload tương tác: cursor, emoji, chat, log,
 // spotlight, follow, sticker, sticky note (Tuần 2-6)
 // ============================================================
 namespace SharedLib.Payloads
@@ -10,16 +10,10 @@ namespace SharedLib.Payloads
     public class CursorPayload
     {
         public string Username { get; set; }
+        public string RoomCode { get; set; }
         public int X { get; set; }
         public int Y { get; set; }
-    }
-
-    public class LaserPayload
-    {
-        public string Username { get; set; }
-        public int X { get; set; }
-        public int Y { get; set; }
-        public bool IsActive { get; set; }  // false = nhả Alt → xóa laser
+        public long Timestamp { get; set; }
     }
 
     public class ReactionPayload

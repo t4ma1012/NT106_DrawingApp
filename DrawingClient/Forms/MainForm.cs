@@ -9,6 +9,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -25,21 +26,23 @@ namespace DrawingClient.Forms
         private DoubleBufferedPictureBox canvas;
         private Panel toolPanel;
         private Panel userPanel;
+        private Panel rightSidebarHost;
+        private Panel rightSidebarHandle;
         private CursorLayer cursorLayer;
         private Button btnColorPicker;
         private Button btnBackColor;
         private Button btnBackImage;
         private Button btnClearAll;
         private Button btnTurnMode;
+        private Button btnToggleSidebar;
         private TrackBar tbPenWidth;
         private Label lblPenWidth;
         private ToolTip colorToolTip;
         private ColorDialog colorDialog;
         private ListBox lstMembers;
-        private ListBox lstChat;
+        private RichTextBox rtbChat;
         private ListBox lstLogs;
         private TextBox txtChatInput;
-        private Label lblFollowState;
         private readonly HashSet<string> locallyShownChat = new HashSet<string>();
         private readonly Queue<string> locallyShownChatOrder = new Queue<string>();
         private readonly HashSet<string> displayedChat = new HashSet<string>();
@@ -58,18 +61,25 @@ namespace DrawingClient.Forms
         private string selectedStickerId;
         private bool isPlacingSticker;
         private bool isStickyNoteMode;
-        private bool isFollowing;
         private readonly object realtimePointerLock = new object();
+        private readonly object remoteCursorLock = new object();
+        private readonly Dictionary<string, CursorPayload> pendingRemoteCursors = new Dictionary<string, CursorPayload>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, long> remoteCursorTimestamps = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         private CursorPayload pendingCursorPayload;
-        private LaserPayload pendingLaserPayload;
         private bool hasPendingCursor;
-        private bool hasPendingLaser;
         private System.Threading.Timer realtimePointerTimer;
+        private System.Windows.Forms.Timer remoteCursorRenderTimer;
         private int isFlushingRealtimePointers;
-        private const int RealtimePointerFlushIntervalMs = 8;
+        private const int RealtimePointerFlushIntervalMs = 12;
+        private const int RemoteCursorRenderIntervalMs = 15;
         private readonly List<DrawAction> actionHistory = new List<DrawAction>();
         private readonly HashSet<string> undoneActionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly List<string> ownRedoActionIds = new List<string>();
+        private bool isReceivingSyncChunks;
+        private readonly Dictionary<ToolType, Button> toolButtons = new Dictionary<ToolType, Button>();
+        private ToolType selectedToolType = ToolType.Pen;
+        private bool isRightSidebarCollapsed;
+        private Form stickerPickerPopup;
 
         public MainForm(ClientNetwork network, string roomCode, bool isRoomOwner = false)
         {
@@ -95,7 +105,7 @@ namespace DrawingClient.Forms
         {
             for (int i = 0; i < 5; i++)
             {
-                _udpManager?.RegisterEndpoint(_network?.CurrentUsername, _roomCode);
+                _udpManager?.RegisterEndpoint(_network?.CurrentUsername, _roomCode, _network?.AssignedServerId);
                 await Task.Delay(250);
             }
         }
@@ -107,7 +117,7 @@ namespace DrawingClient.Forms
                 btnTurnMode.Visible = _isRoomOwner;
 
             if (turnPanel != null)
-                turnPanel.SetState(turnPanel.IsEnabled, turnPanel.ActiveUser, _isRoomOwner);
+                turnPanel.SetState(turnPanel.IsEnabled, turnPanel.ActiveUser, CanAdvanceCurrentTurn(turnPanel.IsEnabled, turnPanel.ActiveUser));
         }
 
         private void ConfigureCanvasManager()
@@ -127,23 +137,6 @@ namespace DrawingClient.Forms
                 RecordAction(ToDrawAction(payload), true);
                 _network?.SendDrawRealtime(payload);
             };
-
-            canvasManager.OnClaimAreaSelected = rect =>
-            {
-                // FIX LỖI: Dùng hàm Send tổng quát
-                _network?.Send(CommandType.CLAIM_AREA, new ClaimAreaPayload
-                {
-                    ClaimID = Guid.NewGuid().ToString(),
-                    Username = _network.CurrentUsername,
-                    X1 = rect.Left,
-                    Y1 = rect.Top,
-                    X2 = rect.Right,
-                    Y2 = rect.Bottom,
-                    DurationSeconds = 30
-                });
-                AppendLog($"Khoanh vùng sở hữu: [{rect.Left},{rect.Top}] - [{rect.Right},{rect.Bottom}]");
-            };
-
             canvasManager.OnNetworkFloodFillAction = payload =>
             {
                 if (payload == null)
@@ -189,7 +182,7 @@ namespace DrawingClient.Forms
             {
                 if (_network?.PreferTcpRealtime == true)
                 {
-                    AppendLog("UDP bo qua trong che do LB relay; cursor/laser dung TCP.");
+                    AppendLog("UDP bo qua trong che do LB relay; cursor dung TCP fallback latest-state.");
                     return;
                 }
 
@@ -218,7 +211,6 @@ namespace DrawingClient.Forms
             NetworkEvents.OnImportImageReceived += NetworkEvents_OnImportImageReceived;
             NetworkEvents.OnSetBackgroundReceived += NetworkEvents_OnSetBackgroundReceived;
             NetworkEvents.OnClearAllReceived += NetworkEvents_OnClearAllReceived;
-            NetworkEvents.OnLaserReceived += NetworkEvents_OnLaserReceived;
             NetworkEvents.OnReactionReceived += NetworkEvents_OnReactionReceived;
             NetworkEvents.OnChatReceived += NetworkEvents_OnChatReceived;
             NetworkEvents.OnActivityLogReceived += NetworkEvents_OnActivityLogReceived;
@@ -227,7 +219,6 @@ namespace DrawingClient.Forms
             NetworkEvents.OnPlaybackReceived += NetworkEvents_OnPlaybackReceived;
             NetworkEvents.OnStickerReceived += NetworkEvents_OnStickerReceived;
             NetworkEvents.OnStickyNoteReceived += NetworkEvents_OnStickyNoteReceived;
-            NetworkEvents.OnFollowModeReceived += NetworkEvents_OnFollowModeReceived;
             NetworkEvents.OnTurnBasedReceived += NetworkEvents_OnTurnBasedReceived;
             NetworkEvents.OnSaveGalleryResponse += NetworkEvents_OnSaveGalleryResponse;
             NetworkEvents.OnAiTextToImageResult += NetworkEvents_OnAiTextToImageResult;
@@ -246,7 +237,6 @@ namespace DrawingClient.Forms
             NetworkEvents.OnImportImageReceived -= NetworkEvents_OnImportImageReceived;
             NetworkEvents.OnSetBackgroundReceived -= NetworkEvents_OnSetBackgroundReceived;
             NetworkEvents.OnClearAllReceived -= NetworkEvents_OnClearAllReceived;
-            NetworkEvents.OnLaserReceived -= NetworkEvents_OnLaserReceived;
             NetworkEvents.OnReactionReceived -= NetworkEvents_OnReactionReceived;
             NetworkEvents.OnChatReceived -= NetworkEvents_OnChatReceived;
             NetworkEvents.OnActivityLogReceived -= NetworkEvents_OnActivityLogReceived;
@@ -255,12 +245,12 @@ namespace DrawingClient.Forms
             NetworkEvents.OnPlaybackReceived -= NetworkEvents_OnPlaybackReceived;
             NetworkEvents.OnStickerReceived -= NetworkEvents_OnStickerReceived;
             NetworkEvents.OnStickyNoteReceived -= NetworkEvents_OnStickyNoteReceived;
-            NetworkEvents.OnFollowModeReceived -= NetworkEvents_OnFollowModeReceived;
             NetworkEvents.OnTurnBasedReceived -= NetworkEvents_OnTurnBasedReceived;
             NetworkEvents.OnSaveGalleryResponse -= NetworkEvents_OnSaveGalleryResponse;
             NetworkEvents.OnAiTextToImageResult -= NetworkEvents_OnAiTextToImageResult;
             NetworkEvents.OnAiBgRemovedResult -= NetworkEvents_OnAiBgRemovedResult;
             StopRealtimePointerTimer();
+            StopRemoteCursorRenderTimer();
             _udpManager?.Stop();
         }
 
@@ -269,6 +259,7 @@ namespace DrawingClient.Forms
             if (disposing)
             {
                 StopRealtimePointerTimer();
+                StopRemoteCursorRenderTimer();
                 _udpManager?.Stop();
             }
 
@@ -286,6 +277,17 @@ namespace DrawingClient.Forms
             timer.Dispose();
         }
 
+        private void StopRemoteCursorRenderTimer()
+        {
+            var timer = remoteCursorRenderTimer;
+            remoteCursorRenderTimer = null;
+            if (timer == null)
+                return;
+
+            timer.Stop();
+            timer.Dispose();
+        }
+
         private void InitializeUI()
         {
             this.Text = string.IsNullOrWhiteSpace(_roomCode) ? "Draw Together" : $"Draw Together - Room {_roomCode}";
@@ -296,30 +298,59 @@ namespace DrawingClient.Forms
 
             toolPanel = new Panel
             {
-                Dock = DockStyle.Left,
-                Width = 270,
+                Dock = DockStyle.Top,
+                Height = 112,
                 BackColor = Color.FromArgb(245, 246, 248),
-                AutoScroll = true,
+                AutoScroll = false,
                 BorderStyle = BorderStyle.FixedSingle,
-                Padding = new Padding(10)
+                Padding = new Padding(4)
+            };
+            rightSidebarHost = new Panel
+            {
+                Dock = DockStyle.Right,
+                Width = 318,
+                BackColor = Color.FromArgb(238, 241, 245),
+                BorderStyle = BorderStyle.FixedSingle,
+                Padding = new Padding(0)
             };
             userPanel = new Panel
             {
-                Dock = DockStyle.Right,
-                Width = 340,
+                Dock = DockStyle.Fill,
                 BackColor = Color.FromArgb(245, 246, 248),
                 BorderStyle = BorderStyle.FixedSingle,
                 Padding = new Padding(6)
             };
+            rightSidebarHandle = new Panel
+            {
+                Dock = DockStyle.Right,
+                Width = 24,
+                BackColor = Color.FromArgb(227, 232, 238)
+            };
             canvas = new DoubleBufferedPictureBox { Dock = DockStyle.Fill, BackColor = Color.White };
+
+            btnToggleSidebar = new Button
+            {
+                Dock = DockStyle.Fill,
+                Text = "◀",
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(227, 232, 238),
+                ForeColor = Color.FromArgb(45, 52, 64),
+                Font = new Font("Segoe UI Symbol", 11F, FontStyle.Bold),
+                TabStop = false
+            };
+            btnToggleSidebar.FlatAppearance.BorderSize = 0;
+            btnToggleSidebar.Click += (s, e) => ToggleRightSidebar();
+            rightSidebarHandle.Controls.Add(btnToggleSidebar);
 
             colorDialog = new ColorDialog();
             BuildToolPanel();
             BuildUserPanel();
 
             this.Controls.Add(canvas);
-            this.Controls.Add(userPanel);
+            this.Controls.Add(rightSidebarHost);
             this.Controls.Add(toolPanel);
+            rightSidebarHost.Controls.Add(userPanel);
+            rightSidebarHost.Controls.Add(rightSidebarHandle);
             this.KeyPreview = true;
             this.KeyDown += MainForm_KeyDown;
             this.KeyUp += MainForm_KeyUp;
@@ -335,14 +366,87 @@ namespace DrawingClient.Forms
             canvas.Paint += Canvas_Paint_Custom;
 
             realtimePointerTimer = new System.Threading.Timer(_ => FlushRealtimePointerState(), null, 0, RealtimePointerFlushIntervalMs);
+            remoteCursorRenderTimer = new System.Windows.Forms.Timer { Interval = RemoteCursorRenderIntervalMs };
+            remoteCursorRenderTimer.Tick += (s, e) => FlushRemoteCursorState();
+            remoteCursorRenderTimer.Start();
             cursorLayer = new CursorLayer(canvas);
             this.Shown += (s, e) => canvasManager?.FitToViewport();
+            UpdateToolSelectionVisuals(selectedToolType);
         }
 
         private void BuildToolPanel()
         {
             colorToolTip = new ToolTip();
-            btnColorPicker = new Button { Text = "Màu nét", Location = new Point(10, 20), Size = new Size(200, 30) };
+
+            toolPanel.Controls.Clear();
+
+            var root = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0),
+                Padding = new Padding(0),
+                BackColor = Color.Transparent,
+                AutoScroll = false
+            };
+            toolPanel.Controls.Add(root);
+
+            Button btnUndo = CreatePaintActionButton("↶", "Hoàn tác (Ctrl+Z)", 28);
+            btnUndo.Click += (s, e) =>
+            {
+                if (!EnsureCanDraw()) return;
+                UndoOwnLastAction();
+            };
+
+            Button btnRedo = CreatePaintActionButton("↷", "Làm lại (Ctrl+Y)", 28);
+            btnRedo.Click += (s, e) =>
+            {
+                if (!EnsureCanDraw()) return;
+                RedoOwnLastAction();
+            };
+
+            Button btnImport = CreatePaintActionButton("📥", "Nhập ảnh", 28);
+            btnImport.Click += BtnImport_Click;
+
+            Button btnExport = CreatePaintActionButton("📤", "Xuất ảnh", 28);
+            btnExport.Click += BtnExport_Click;
+
+            Button btnGallery = CreatePaintActionButton("🖼", "Mở gallery", 28);
+            btnGallery.Click += (s, e) => new GalleryForm(_network).Show(this);
+
+            Button btnSaveGallery = CreatePaintActionButton("★", "Lưu vào gallery", 28);
+            btnSaveGallery.Click += (s, e) => SaveCurrentCanvasToGallery();
+
+            Button btnAiTextToDrawing = CreatePaintActionButton("✨", "AI text-to-image", 28, Color.Honeydew);
+            btnAiTextToDrawing.Click += BtnAiTextToDrawing_Click;
+
+            Button btnAiRemoveBg = CreatePaintActionButton("✂", "AI remove background", 28, Color.Honeydew);
+            btnAiRemoveBg.Click += BtnAiRemoveBackground_Click;
+
+            Button btnToggleChat = CreatePaintActionButton("🗂", "Ẩn/hiện khung chat bên phải", 28);
+            btnToggleChat.Click += (s, e) => ToggleRightSidebar();
+
+            Button btnLeaveRoom = CreatePaintActionButton("↩", "Rời phòng", 28, Color.MistyRose);
+            btnLeaveRoom.Click += (s, e) =>
+            {
+                _network?.SendLeaveRoom();
+                var lobby = new LobbyForm(_network, _network.CurrentUsername);
+                lobby.FormClosed += (fs, fe) => this.Show();
+                lobby.Show();
+                this.Hide();
+            };
+
+            toolButtons.Clear();
+            foreach (ToolType toolType in Enum.GetValues(typeof(ToolType)))
+            {
+                string glyph = GetToolGlyph(toolType);
+                string tooltip = GetToolTooltip(toolType);
+                Button toolButton = CreatePaintToolButton(glyph, tooltip);
+                toolButton.Tag = toolType;
+                toolButton.Click += (s, e) => SelectToolFromToolbar((ToolType)((Button)s).Tag);
+                toolButtons[toolType] = toolButton;
+            }
+
+            btnColorPicker = CreatePaintActionButton("■", "Màu nét", 28);
             btnColorPicker.Click += (s, e) =>
             {
                 if (colorDialog.ShowDialog() == DialogResult.OK)
@@ -353,15 +457,7 @@ namespace DrawingClient.Forms
                 }
             };
 
-            tbPenWidth = new TrackBar { Location = new Point(10, 60), Size = new Size(110, 45), Minimum = 1, Maximum = 30, Value = 2 };
-            lblPenWidth = new Label { Location = new Point(125, 65), Size = new Size(85, 20), Text = $"Độ dày: {tbPenWidth.Value}px", TextAlign = ContentAlignment.MiddleLeft };
-            tbPenWidth.Scroll += (s, e) => 
-            {
-                canvasManager.PenWidth = tbPenWidth.Value;
-                lblPenWidth.Text = $"Độ dày: {tbPenWidth.Value}px";
-            };
-
-            btnBackColor = new Button { Text = "Màu nền", Location = new Point(10, 110), Size = new Size(200, 30) };
+            btnBackColor = CreatePaintActionButton("▣", "Màu nền", 28);
             btnBackColor.Click += (s, e) =>
             {
                 if (colorDialog.ShowDialog() == DialogResult.OK)
@@ -369,12 +465,12 @@ namespace DrawingClient.Forms
                     canvasManager.ChangeBackgroundColor(colorDialog.Color);
                     var payload = new SetBackgroundPayload
                     {
-                    ActionID = Guid.NewGuid().ToString(),
-                    RoomCode = _roomCode,
-                    Username = _network.CurrentUsername,
-                    ColorARGB = colorDialog.Color.ToArgb(),
-                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                };
+                        ActionID = Guid.NewGuid().ToString(),
+                        RoomCode = _roomCode,
+                        Username = _network.CurrentUsername,
+                        ColorARGB = colorDialog.Color.ToArgb(),
+                        Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                    };
                     RecordAction(ToDrawAction(payload), true);
                     _network?.Send(CommandType.SET_BACKGROUND, payload);
                     if (_network?.PreferTcpRealtime != true)
@@ -383,10 +479,39 @@ namespace DrawingClient.Forms
                 }
             };
 
-            btnBackImage = new Button { Text = "Anh nen", Location = new Point(10, 145), Size = new Size(200, 30) };
+            btnBackImage = CreatePaintActionButton("🖼", "Ảnh nền", 28);
             btnBackImage.Click += BtnBackImage_Click;
 
-            btnClearAll = new Button { Text = "Xóa toàn bộ", Location = new Point(10, 145), Size = new Size(200, 30) };
+            tbPenWidth = new TrackBar
+            {
+                Minimum = 1,
+                Maximum = 30,
+                Value = 2,
+                TickStyle = TickStyle.None,
+                Width = 82,
+                Height = 24,
+                Margin = new Padding(0)
+            };
+            lblPenWidth = new Label
+            {
+                Width = 58,
+                Height = 24,
+                Text = $"{tbPenWidth.Value}px",
+                TextAlign = ContentAlignment.MiddleLeft,
+                Margin = new Padding(0)
+            };
+            tbPenWidth.Scroll += (s, e) =>
+            {
+                canvasManager.PenWidth = tbPenWidth.Value;
+                lblPenWidth.Text = $"{tbPenWidth.Value}px";
+            };
+
+            Button btnZoomIn = CreatePaintActionButton("＋", "Zoom lớn hơn", 28);
+            btnZoomIn.Click += (s, e) => AdjustCanvasZoom(ZoomStep);
+            Button btnZoomOut = CreatePaintActionButton("－", "Zoom nhỏ hơn", 28);
+            btnZoomOut.Click += (s, e) => AdjustCanvasZoom(-ZoomStep);
+
+            btnClearAll = CreatePaintActionButton("✖", "Xóa toàn bộ", 28, Color.MistyRose);
             btnClearAll.Click += (s, e) =>
             {
                 if (!EnsureCanDraw()) return;
@@ -397,49 +522,20 @@ namespace DrawingClient.Forms
                 _network?.SendEmpty(CommandType.CLEAR_ALL);
             };
 
-            Button btnUndo = new Button { Text = "Hoàn tác (Ctrl+Z)", Location = new Point(10, 180), Size = new Size(200, 30) };
-            btnUndo.Click += (s, e) =>
+            stickerPicker = new StickerPickerControl { Size = new Size(220, 95) };
+            stickerPicker.StickerSelected += id =>
             {
-                if (!EnsureCanDraw()) return;
-                UndoOwnLastAction();
+                selectedStickerId = id;
+                isPlacingSticker = true;
+                isStickyNoteMode = false;
+                stickerPickerPopup?.Hide();
+                ToastForm.ShowToast(this, "Đã chọn sticker, kéo thả trên canvas để đặt");
             };
 
-            Button btnRedo = new Button { Text = "Làm lại (Ctrl+Y)", Location = new Point(10, 215), Size = new Size(200, 30) };
-            btnRedo.Click += (s, e) =>
-            {
-                if (!EnsureCanDraw()) return;
-                RedoOwnLastAction();
-            };
+            Button btnStickerLibrary = CreatePaintActionButton("🏷", "Mở thư viện sticker", 28);
+            btnStickerLibrary.Click += (s, e) => ShowStickerPickerPopup(btnStickerLibrary);
 
-            Button btnImport = new Button { Text = "Nhập ảnh", Location = new Point(10, 250), Size = new Size(200, 30) };
-            btnImport.Click += BtnImport_Click;
-
-            Button btnExport = new Button { Text = "Xuất ảnh", Location = new Point(10, 285), Size = new Size(200, 30) };
-            btnExport.Click += BtnExport_Click;
-
-            Button btnGallery = new Button { Text = "Gallery", Location = new Point(10, 355), Size = new Size(200, 30) };
-            btnGallery.Click += (s, e) => new GalleryForm(_network).Show(this);
-
-            Button btnSaveGallery = new Button { Text = "Lưu vào Gallery", Location = new Point(10, 390), Size = new Size(200, 30) };
-            btnSaveGallery.Click += (s, e) => SaveCurrentCanvasToGallery();
-
-            Button btnAiTextToDrawing = new Button { Text = "AI: Text-to-Drawing", Location = new Point(10, 425), Size = new Size(200, 30), BackColor = Color.Honeydew };
-            btnAiTextToDrawing.Click += BtnAiTextToDrawing_Click;
-
-            Button btnAiRemoveBg = new Button { Text = "AI: Xóa nền ảnh", Location = new Point(10, 460), Size = new Size(200, 30), BackColor = Color.Honeydew };
-            btnAiRemoveBg.Click += BtnAiRemoveBackground_Click;
-
-            Button btnZoomIn = new Button { Text = "Zoom +", Location = new Point(10, 535), Size = new Size(95, 30) };
-            btnZoomIn.Click += (s, e) => AdjustCanvasZoom(ZoomStep);
-            Button btnZoomOut = new Button { Text = "Zoom -", Location = new Point(115, 535), Size = new Size(95, 30) };
-            btnZoomOut.Click += (s, e) => AdjustCanvasZoom(-ZoomStep);
-
-            ComboBox cbTools = new ComboBox { Location = new Point(10, 570), Size = new Size(200, 30), DropDownStyle = ComboBoxStyle.DropDownList };
-            cbTools.Items.AddRange(Enum.GetNames(typeof(ToolType)));
-            cbTools.SelectedItem = ToolType.Pen.ToString();
-            cbTools.SelectedIndexChanged += (s, e) => canvasManager.CurrentTool = (ToolType)cbTools.SelectedIndex;
-
-            Button btnStickerMode = new Button { Text = "Đặt sticker", Location = new Point(10, 605), Size = new Size(200, 30) };
+            Button btnStickerMode = CreatePaintActionButton("📌", "Bật/tắt chế độ đặt sticker", 28);
             btnStickerMode.Click += (s, e) =>
             {
                 isPlacingSticker = !isPlacingSticker;
@@ -447,15 +543,7 @@ namespace DrawingClient.Forms
                 ToastForm.ShowToast(this, isPlacingSticker ? "Kéo thả trên canvas để đặt kích cỡ sticker" : "Tắt đặt sticker");
             };
 
-            stickerPicker = new StickerPickerControl { Location = new Point(10, 640), Size = new Size(200, 95) };
-            stickerPicker.StickerSelected += id =>
-            {
-                selectedStickerId = id;
-                isPlacingSticker = true;
-                isStickyNoteMode = false;
-            };
-
-            Button btnStickyNote = new Button { Text = "Thêm ghi chú", Location = new Point(10, 740), Size = new Size(200, 30) };
+            Button btnStickyNote = CreatePaintActionButton("📝", "Thêm ghi chú", 28);
             btnStickyNote.Click += (s, e) =>
             {
                 isStickyNoteMode = !isStickyNoteMode;
@@ -463,16 +551,7 @@ namespace DrawingClient.Forms
                 ToastForm.ShowToast(this, isStickyNoteMode ? "Click canvas để tạo ghi chú" : "Tắt tạo ghi chú");
             };
 
-            var txtFollowTarget = new TextBox { Location = new Point(10, 775), Size = new Size(130, 30), Text = "username" };
-            var btnFollow = new Button { Text = "Follow", Location = new Point(145, 775), Size = new Size(65, 30) };
-            btnFollow.Click += (s, e) =>
-            {
-                isFollowing = !isFollowing;
-                _network?.SendFollowMode(txtFollowTarget.Text.Trim(), isFollowing);
-                lblFollowState.Text = isFollowing ? $"Đang follow: {txtFollowTarget.Text.Trim()}" : "Follow: OFF";
-            };
-
-            btnTurnMode = new Button { Text = "Bật/Tắt vẽ theo lượt", Location = new Point(10, 810), Size = new Size(200, 30) };
+            btnTurnMode = CreatePaintActionButton("⏱", "Bật/tắt vẽ theo lượt", 28);
             btnTurnMode.Visible = _isRoomOwner;
             btnTurnMode.Click += (s, e) =>
             {
@@ -495,72 +574,105 @@ namespace DrawingClient.Forms
                 _udpManager?.SendTurnBased(payload);
             };
 
-            lblFollowState = new Label { Location = new Point(10, 895), Size = new Size(220, 26), Text = "Follow: OFF" };
+            FlowLayoutPanel row1Left;
+            FlowLayoutPanel row1Right;
+            FlowLayoutPanel row2Left;
+            FlowLayoutPanel row2Right;
+            FlowLayoutPanel row3Left;
+            FlowLayoutPanel row3Right;
 
-            Button btnLeaveRoom = new Button { Text = "Rời phòng", Location = new Point(10, 930), Size = new Size(200, 30), BackColor = Color.LightCoral };
-            btnLeaveRoom.Click += (s, e) =>
-            {
-                _network?.SendLeaveRoom();
-                var lobby = new LobbyForm(_network, _network.CurrentUsername);
-                lobby.FormClosed += (fs, fe) => this.Show();
-                lobby.Show();
-                this.Hide();
-            };
+            Panel row1 = CreateToolbarCompactRow(out row1Left, out row1Right);
+            Panel row2 = CreateToolbarCompactRow(out row2Left, out row2Right);
+            Panel row3 = CreateToolbarCompactRow(out row3Left, out row3Right);
 
-            Button btnToggleChat = new Button { Text = "Ẩn/Hiện khung phải", Location = new Point(10, 965), Size = new Size(200, 30), BackColor = Color.LightBlue };
-            btnToggleChat.Click += (s, e) =>
-            {
-                userPanel.Visible = !userPanel.Visible;
-                canvasManager?.FitToViewport();
-            };
+            root.Controls.Add(row3);
+            root.Controls.Add(row2);
+            root.Controls.Add(row1);
 
-            Label lblDrawingHeader = CreateToolHeader("Vẽ");
-            Label lblHistoryHeader = CreateToolHeader("Lịch sử");
-            Label lblFileHeader = CreateToolHeader("Tệp và thư viện");
-            Label lblAiHeader = CreateToolHeader("AI");
-            Label lblCollabHeader = CreateToolHeader("Cộng tác");
-            int y = 12;
+            row1Left.Controls.Add(CreateToolbarLabel("Vẽ"));
+            AddWrapControl(row1Left, toolButtons[ToolType.Pen]);
+            AddWrapControl(row1Left, toolButtons[ToolType.Mouse]);
+            AddWrapControl(row1Left, toolButtons[ToolType.Line]);
+            AddWrapControl(row1Left, toolButtons[ToolType.Rectangle]);
+            AddWrapControl(row1Left, toolButtons[ToolType.Circle]);
+            AddWrapControl(row1Left, toolButtons[ToolType.Eraser]);
+            AddWrapControl(row1Left, toolButtons[ToolType.FloodFill]);
+            AddWrapControl(row1Left, toolButtons[ToolType.Text]);
+            AddWrapControl(row1Left, toolButtons[ToolType.Pipette]);
 
-            y = PlaceToolHeader(lblDrawingHeader, y);
-            y = PlaceToolControl(cbTools, y);
-            y = PlaceToolControl(btnColorPicker, y);
-            y = PlaceToolControl(btnBackColor, y);
-            y = PlaceToolControl(btnBackImage, y);
-            y = PlaceToolPair(tbPenWidth, lblPenWidth, y, 146, 74, 45);
-            y = PlaceToolPair(btnZoomIn, btnZoomOut, y, 108, 108);
-            y = PlaceToolControl(btnClearAll, y);
+            row1Left.Controls.Add(CreateToolbarLabel("Điều hướng"));
+            AddWrapControl(row1Left, btnUndo);
+            AddWrapControl(row1Left, btnRedo);
+            AddWrapControl(row1Left, btnToggleChat);
+            AddWrapControl(row1Left, btnLeaveRoom);
 
-            y = PlaceToolHeader(lblHistoryHeader, y + 4);
-            y = PlaceToolPair(btnUndo, btnRedo, y, 108, 108);
+            row2Left.Controls.Add(CreateToolbarLabel("Nền"));
+            AddWrapControl(row2Left, btnColorPicker);
+            AddWrapControl(row2Left, btnBackColor);
+            AddWrapControl(row2Left, btnBackImage);
+            row2Left.Controls.Add(CreateToolbarLabel("Nét"));
+            row2Left.Controls.Add(tbPenWidth);
+            row2Left.Controls.Add(lblPenWidth);
+            AddWrapControl(row2Left, btnClearAll);
 
-            y = PlaceToolHeader(lblFileHeader, y + 4);
-            y = PlaceToolControl(btnImport, y);
-            y = PlaceToolControl(btnExport, y);
-            y = PlaceToolPair(btnGallery, btnSaveGallery, y, 108, 108);
+            row2Left.Controls.Add(CreateToolbarLabel("Canvas"));
+            AddWrapControl(row2Left, btnZoomOut);
+            AddWrapControl(row2Left, btnZoomIn);
 
-            y = PlaceToolHeader(lblAiHeader, y + 4);
-            y = PlaceToolControl(btnAiTextToDrawing, y);
-            y = PlaceToolControl(btnAiRemoveBg, y);
-            y = PlaceToolHeader(lblCollabHeader, y + 4);
-            y = PlaceToolControl(btnStickerMode, y);
-            y = PlaceToolControl(stickerPicker, y, 94);
-            y = PlaceToolControl(btnStickyNote, y);
-            y = PlaceToolPair(txtFollowTarget, btnFollow, y, 146, 74);
-            y = PlaceToolControl(lblFollowState, y, 24);
-            y = PlaceToolControl(btnTurnMode, y);
-            y = PlaceToolControl(btnLeaveRoom, y);
-            y = PlaceToolControl(btnToggleChat, y);
+            row3Left.Controls.Add(CreateToolbarLabel("Tệp/Lưu"));
+            AddWrapControl(row3Left, btnImport);
+            AddWrapControl(row3Left, btnExport);
+            AddWrapControl(row3Left, btnGallery);
+            AddWrapControl(row3Left, btnSaveGallery);
 
-            toolPanel.Controls.AddRange(new Control[]
-            {
-                lblDrawingHeader, lblHistoryHeader, lblFileHeader, lblAiHeader, lblCollabHeader,
-                btnColorPicker, tbPenWidth, btnBackColor, btnBackImage, btnClearAll,
-                btnUndo, btnRedo, btnImport, btnExport, btnGallery, btnSaveGallery,
-                btnAiTextToDrawing, btnAiRemoveBg, lblPenWidth, btnZoomIn, btnZoomOut, cbTools, btnStickerMode, stickerPicker,
-                btnStickyNote, txtFollowTarget, btnFollow, btnTurnMode,
-                lblFollowState, btnLeaveRoom, btnToggleChat
-            });
+            row3Left.Controls.Add(CreateToolbarLabel("AI"));
+            AddWrapControl(row3Left, btnAiTextToDrawing);
+            AddWrapControl(row3Left, btnAiRemoveBg);
+            row3Left.Controls.Add(CreateToolbarLabel("Sticker"));
+            AddWrapControl(row3Left, btnStickerLibrary);
+            AddWrapControl(row3Left, btnStickerMode);
+            AddWrapControl(row3Left, btnStickyNote);
+            AddWrapControl(row3Left, btnTurnMode);
+
             NormalizeToolPanelControls();
+            UpdateToolSelectionVisuals(selectedToolType);
+        }
+
+        private Panel CreateToolbarCompactRow(out FlowLayoutPanel leftPanel, out FlowLayoutPanel rightPanel)
+        {
+            var row = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 34,
+                Margin = new Padding(0),
+                Padding = new Padding(2, 1, 2, 1),
+                BackColor = Color.FromArgb(242, 242, 242)
+            };
+
+            rightPanel = CreateToolbarCompactFlow(true);
+            rightPanel.Dock = DockStyle.Right;
+
+            leftPanel = CreateToolbarCompactFlow(false);
+            leftPanel.Dock = DockStyle.Fill;
+
+            row.Controls.Add(leftPanel);
+            row.Controls.Add(rightPanel);
+            return row;
+        }
+
+        private FlowLayoutPanel CreateToolbarCompactFlow(bool autoSize)
+        {
+            return new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                AutoScroll = false,
+                AutoSize = autoSize,
+                AutoSizeMode = autoSize ? AutoSizeMode.GrowAndShrink : AutoSizeMode.GrowOnly,
+                Margin = new Padding(0),
+                Padding = new Padding(0),
+                BackColor = Color.Transparent
+            };
         }
 
         private Label CreateToolHeader(string text)
@@ -598,25 +710,295 @@ namespace DrawingClient.Forms
             return y + height + 7;
         }
 
+        private FlowLayoutPanel CreateToolbarWrapRow()
+        {
+            return new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = true,
+                AutoScroll = false,
+                AutoSize = false,
+                Margin = new Padding(0),
+                Padding = new Padding(2, 1, 2, 1),
+                BackColor = Color.FromArgb(242, 242, 242)
+            };
+        }
+
+        private Button CreatePaintActionButton(string text, string tooltip, int width, Color? backColor = null)
+        {
+            var button = new Button
+            {
+                Text = text,
+                Width = width,
+                Height = 24,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = backColor ?? Color.White,
+                ForeColor = Color.FromArgb(35, 35, 35),
+                Font = new Font("Segoe UI", 8.5F, FontStyle.Regular),
+                Margin = new Padding(0)
+            };
+            button.FlatAppearance.BorderColor = Color.FromArgb(196, 196, 196);
+            button.FlatAppearance.BorderSize = 1;
+            colorToolTip?.SetToolTip(button, tooltip);
+            return button;
+        }
+
+        private Button CreatePaintToolButton(string icon, string tooltip)
+        {
+            var button = new Button
+            {
+                Text = icon,
+                Width = 30,
+                Height = 24,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.White,
+                ForeColor = Color.FromArgb(30, 30, 30),
+                Font = new Font("Segoe UI Symbol", 9F, FontStyle.Regular),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Margin = new Padding(0)
+            };
+            button.FlatAppearance.BorderColor = Color.FromArgb(190, 190, 190);
+            button.FlatAppearance.BorderSize = 1;
+            colorToolTip?.SetToolTip(button, tooltip);
+            return button;
+        }
+
+        private Label CreateToolbarLabel(string text)
+        {
+            return new Label
+            {
+                Text = text,
+                AutoSize = true,
+                Height = 24,
+                Margin = new Padding(4, 5, 4, 0),
+                TextAlign = ContentAlignment.MiddleLeft,
+                ForeColor = Color.FromArgb(35, 35, 35),
+                Font = new Font("Segoe UI", 8.25F, FontStyle.Bold)
+            };
+        }
+
+        private void AddWrapControl(FlowLayoutPanel panel, Control control)
+        {
+            if (panel == null || control == null)
+                return;
+
+            panel.Controls.Add(control);
+            control.Margin = new Padding(2, 4, 2, 0);
+        }
+
+        private void AddHostedControl(ToolStrip strip, Control control)
+        {
+            if (strip == null || control == null)
+                return;
+
+            var host = new ToolStripControlHost(control)
+            {
+                AutoSize = false,
+                Width = control.Width,
+                Height = Math.Max(24, control.Height),
+                Margin = new Padding(1, 0, 1, 0)
+            };
+            strip.Items.Add(host);
+        }
+
+        private void ShowStickerPickerPopup(Control anchor)
+        {
+            if (anchor == null)
+                return;
+
+            if (stickerPickerPopup == null || stickerPickerPopup.IsDisposed)
+            {
+                stickerPickerPopup = new Form
+                {
+                    FormBorderStyle = FormBorderStyle.FixedToolWindow,
+                    StartPosition = FormStartPosition.Manual,
+                    ShowInTaskbar = false,
+                    TopMost = true,
+                    BackColor = Color.White,
+                    ClientSize = new Size(230, 105),
+                    Text = "Sticker"
+                };
+
+                stickerPicker.Dock = DockStyle.Fill;
+                stickerPickerPopup.Controls.Add(stickerPicker);
+                stickerPickerPopup.Deactivate += (s, e) =>
+                {
+                    if (stickerPickerPopup != null && !stickerPickerPopup.IsDisposed)
+                        stickerPickerPopup.Hide();
+                };
+            }
+
+            Point screen = anchor.PointToScreen(new Point(0, anchor.Height + 2));
+            stickerPickerPopup.Location = screen;
+            stickerPickerPopup.Show();
+            stickerPickerPopup.BringToFront();
+        }
+
+        private Button CreateSymbolButton(string text, string tooltip, int width, int height, Color? backColor = null)
+        {
+            var button = new Button
+            {
+                Text = text,
+                Width = width,
+                Height = height,
+                Margin = new Padding(4, 4, 4, 0),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = backColor ?? Color.White,
+                ForeColor = Color.FromArgb(45, 52, 64),
+                Font = new Font("Segoe UI Symbol", 10F, FontStyle.Regular)
+            };
+            button.FlatAppearance.BorderColor = Color.FromArgb(205, 210, 216);
+            button.FlatAppearance.BorderSize = 1;
+            colorToolTip?.SetToolTip(button, tooltip);
+            return button;
+        }
+
+        private void AddToolbarGroup(FlowLayoutPanel root, string title, params Control[] controls)
+        {
+            AddToolbarGroup(root, title, (IEnumerable<Control>)controls);
+        }
+
+        private void AddToolbarGroup(FlowLayoutPanel root, string title, IEnumerable<Control> controls)
+        {
+            var group = new Panel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                BackColor = Color.FromArgb(250, 251, 252),
+                BorderStyle = BorderStyle.FixedSingle,
+                Margin = new Padding(4),
+                Padding = new Padding(6)
+            };
+
+            var header = new Label
+            {
+                Text = title,
+                AutoSize = false,
+                Width = 220,
+                Height = 18,
+                Font = new Font("Segoe UI", 8.5F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(65, 73, 84),
+                Margin = new Padding(0, 0, 0, 4),
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+
+            var flow = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = true,
+                Margin = new Padding(0),
+                Padding = new Padding(0),
+                BackColor = Color.Transparent
+            };
+
+            foreach (Control control in controls)
+            {
+                if (control == null)
+                    continue;
+                flow.Controls.Add(control);
+            }
+
+            group.Controls.Add(flow);
+            group.Controls.Add(header);
+            flow.Location = new Point(6, 24);
+            header.Location = new Point(6, 6);
+            group.Size = new Size(Math.Max(220, flow.PreferredSize.Width + 12), flow.PreferredSize.Height + 34);
+            root.Controls.Add(group);
+        }
+
         private void NormalizeToolPanelControls()
         {
             foreach (Control control in toolPanel.Controls)
             {
-                control.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-                control.Margin = new Padding(0, 0, 0, 6);
+                control.Margin = new Padding(0);
             }
+        }
 
-            foreach (Control control in toolPanel.Controls)
+        private void SelectToolFromToolbar(ToolType toolType)
+        {
+            selectedToolType = toolType;
+            if (canvasManager != null)
+                canvasManager.CurrentTool = toolType;
+            UpdateToolSelectionVisuals(toolType);
+        }
+
+        private void UpdateToolSelectionVisuals(ToolType selectedTool)
+        {
+            foreach (var entry in toolButtons)
             {
-                var button = control as Button;
-                if (button == null)
-                    continue;
-
-                button.FlatStyle = FlatStyle.System;
-                button.TextAlign = ContentAlignment.MiddleCenter;
+                bool isSelected = entry.Key == selectedTool;
+                entry.Value.BackColor = isSelected ? Color.FromArgb(208, 230, 255) : Color.White;
+                entry.Value.FlatAppearance.BorderColor = isSelected ? Color.FromArgb(70, 120, 180) : Color.FromArgb(205, 210, 216);
+                entry.Value.Font = new Font("Segoe UI", isSelected ? 8.5F : 8.25F, isSelected ? FontStyle.Bold : FontStyle.Regular);
             }
+        }
 
-            toolPanel.AutoScrollMargin = new Size(0, 16);
+        private string GetToolGlyph(ToolType toolType)
+        {
+            switch (toolType)
+            {
+                case ToolType.Pen:
+                    return "✏";
+                case ToolType.Mouse:
+                    return "🖱";
+                case ToolType.Line:
+                    return "／";
+                case ToolType.Rectangle:
+                    return "▭";
+                case ToolType.Circle:
+                    return "◯";
+                case ToolType.Eraser:
+                    return "⌫";
+                case ToolType.FloodFill:
+                    return "▨";
+                case ToolType.Text:
+                    return "A";
+                case ToolType.Pipette:
+                    return "🧪";
+                default:
+                    return toolType.ToString();
+            }
+        }
+
+        private string GetToolTooltip(ToolType toolType)
+        {
+            switch (toolType)
+            {
+                case ToolType.Pen:
+                    return "Bút vẽ";
+                case ToolType.Mouse:
+                    return "Chọn / kéo / pan";
+                case ToolType.Line:
+                    return "Vẽ đường thẳng";
+                case ToolType.Rectangle:
+                    return "Vẽ hình chữ nhật";
+                case ToolType.Circle:
+                    return "Vẽ hình tròn";
+                case ToolType.Eraser:
+                    return "Tẩy";
+                case ToolType.FloodFill:
+                    return "Tô màu";
+                case ToolType.Text:
+                    return "Chèn chữ";
+                case ToolType.Pipette:
+                    return "Hút màu";
+                default:
+                    return toolType.ToString();
+            }
+        }
+
+        private void ToggleRightSidebar()
+        {
+            isRightSidebarCollapsed = !isRightSidebarCollapsed;
+            userPanel.Visible = !isRightSidebarCollapsed;
+            rightSidebarHost.Width = isRightSidebarCollapsed ? 24 : 318;
+            btnToggleSidebar.Text = isRightSidebarCollapsed ? "▶" : "◀";
+            btnToggleSidebar.AccessibleDescription = isRightSidebarCollapsed ? "Hiện thanh bên phải" : "Ẩn thanh bên phải";
+            canvasManager?.FitToViewport();
+            canvas.Invalidate();
         }
 
         private void AdjustCanvasZoom(float delta, Point? pivot = null)
@@ -645,7 +1027,19 @@ namespace DrawingClient.Forms
             lstMembers = new ListBox { Dock = DockStyle.Fill };
             tabMembers.Controls.Add(lstMembers);
 
-            lstChat = new ListBox { Dock = DockStyle.Fill };
+            rtbChat = new RichTextBox
+            {
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                WordWrap = true,
+                Multiline = true,
+                DetectUrls = false,
+                BorderStyle = BorderStyle.FixedSingle,
+                ScrollBars = RichTextBoxScrollBars.Vertical,
+                BackColor = Color.White,
+                ForeColor = Color.Black,
+                Font = new Font("Segoe UI", 9F)
+            };
             Panel chatBottom = new Panel { Dock = DockStyle.Bottom, Height = 40 };
             txtChatInput = new TextBox { Dock = DockStyle.Fill };
             Button btnSendChat = new Button { Text = "Gửi", Dock = DockStyle.Right, Width = 65 };
@@ -661,8 +1055,8 @@ namespace DrawingClient.Forms
 
             chatBottom.Controls.Add(txtChatInput);
             chatBottom.Controls.Add(btnSendChat);
-            tabChat.Controls.Add(lstChat);
             tabChat.Controls.Add(chatBottom);
+            tabChat.Controls.Add(rtbChat);
 
             lstLogs = new ListBox { Dock = DockStyle.Fill };
             tabLogs.Controls.Add(lstLogs);
@@ -685,20 +1079,11 @@ namespace DrawingClient.Forms
             QueueRealtimeCursor(new CursorPayload
             {
                 Username = _network.CurrentUsername,
+                RoomCode = _roomCode,
                 X = canvasPoint.X,
-                Y = canvasPoint.Y
+                Y = canvasPoint.Y,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             });
-
-            if ((ModifierKeys & Keys.Alt) == Keys.Alt)
-            {
-                QueueRealtimeLaser(new LaserPayload
-                {
-                    Username = _network.CurrentUsername,
-                    X = canvasPoint.X,
-                    Y = canvasPoint.Y,
-                    IsActive = true
-                });
-            }
         }
 
         private void QueueRealtimeCursor(CursorPayload payload)
@@ -713,18 +1098,6 @@ namespace DrawingClient.Forms
             }
         }
 
-        private void QueueRealtimeLaser(LaserPayload payload)
-        {
-            if (payload == null)
-                return;
-
-            lock (realtimePointerLock)
-            {
-                pendingLaserPayload = payload;
-                hasPendingLaser = true;
-            }
-        }
-
         private void FlushRealtimePointerState()
         {
             if (Interlocked.Exchange(ref isFlushingRealtimePointers, 1) == 1)
@@ -733,7 +1106,6 @@ namespace DrawingClient.Forms
             try
             {
                 CursorPayload cursor = null;
-                LaserPayload laser = null;
 
                 lock (realtimePointerLock)
                 {
@@ -742,19 +1114,10 @@ namespace DrawingClient.Forms
                         cursor = pendingCursorPayload;
                         hasPendingCursor = false;
                     }
-
-                    if (hasPendingLaser)
-                    {
-                        laser = pendingLaserPayload;
-                        hasPendingLaser = false;
-                    }
                 }
 
                 if (cursor != null)
                     SendCursorRealtime(cursor);
-
-                if (laser != null)
-                    SendLaserRealtime(laser);
             }
             finally
             {
@@ -770,26 +1133,15 @@ namespace DrawingClient.Forms
                 payload.Username = _network?.CurrentUsername;
             if (string.IsNullOrWhiteSpace(payload.Username))
                 return;
+            if (string.IsNullOrWhiteSpace(payload.RoomCode))
+                payload.RoomCode = _roomCode;
+            if (payload.Timestamp <= 0)
+                payload.Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
             if (_udpManager != null && _network?.PreferTcpRealtime != true)
                 _udpManager.SendCursor(payload);
             else
                 _network?.SendCursorRealtime(payload);
-        }
-
-        private void SendLaserRealtime(LaserPayload payload)
-        {
-            if (payload == null)
-                return;
-            if (string.IsNullOrWhiteSpace(payload.Username))
-                payload.Username = _network?.CurrentUsername;
-            if (string.IsNullOrWhiteSpace(payload.Username))
-                return;
-
-            if (_udpManager != null && _network?.PreferTcpRealtime != true)
-                _udpManager.SendLaser(payload);
-            else
-                _network?.SendLaserRealtime(payload);
         }
 
         private void Canvas_MouseDown_Custom(object sender, MouseEventArgs e)
@@ -1007,6 +1359,7 @@ namespace DrawingClient.Forms
                     ToastForm.ShowToast(this, "Da dat anh nen canvas");
                 }
             }
+
         }
 
         private void BtnImport_Click(object sender, EventArgs e)
@@ -1019,7 +1372,9 @@ namespace DrawingClient.Forms
                 if (openFileDialog.ShowDialog() != DialogResult.OK)
                     return;
 
-                if (pendingImportImage != null) pendingImportImage.Dispose();
+                if (pendingImportImage != null)
+                    pendingImportImage.Dispose();
+
                 pendingImportImage = Image.FromFile(openFileDialog.FileName);
                 pendingImportAiType = null;
                 pendingImportPrompt = null;
@@ -1403,7 +1758,7 @@ namespace DrawingClient.Forms
 
         private void AppendChatMessage(ChatPayload payload)
         {
-            if (payload == null || lstChat == null)
+            if (payload == null || rtbChat == null)
                 return;
 
             string key = BuildChatKey(payload);
@@ -1418,8 +1773,10 @@ namespace DrawingClient.Forms
 
             long ts = payload.Timestamp > 0 ? payload.Timestamp : DateTimeOffset.Now.ToUnixTimeMilliseconds();
             DateTimeOffset time = DateTimeOffset.FromUnixTimeMilliseconds(ts).ToLocalTime();
-            lstChat.Items.Add($"[{time:HH:mm}] {payload.Username}: {payload.Message}");
-            lstChat.TopIndex = lstChat.Items.Count - 1;
+            string chatLine = $"[{time:HH:mm}] {payload.Username}: {payload.Message}{Environment.NewLine}";
+            rtbChat.AppendText(chatLine);
+            rtbChat.SelectionStart = rtbChat.TextLength;
+            rtbChat.ScrollToCaret();
         }
 
         private void AppendLog(string message)
@@ -1658,15 +2015,43 @@ namespace DrawingClient.Forms
 
         private void NetworkEvents_OnCursorReceived(CursorPayload payload)
         {
-            if (payload == null)
+            if (payload == null || string.IsNullOrWhiteSpace(payload.Username))
                 return;
             if (IsCurrentUser(payload.Username))
                 return;
-            UIInvoke(() =>
+
+            long timestamp = payload.Timestamp > 0
+                ? payload.Timestamp
+                : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            lock (remoteCursorLock)
             {
-                canvasManager.UpdateRemoteCursor(payload.Username, new Point(payload.X, payload.Y));
-                cursorLayer?.UpdateCursor(payload);
-            });
+                if (remoteCursorTimestamps.TryGetValue(payload.Username, out long latest) && timestamp < latest)
+                    return;
+
+                payload.Timestamp = timestamp;
+                remoteCursorTimestamps[payload.Username] = timestamp;
+                pendingRemoteCursors[payload.Username] = payload;
+            }
+        }
+
+        private void FlushRemoteCursorState()
+        {
+            Dictionary<string, CursorPayload> snapshot = null;
+            lock (remoteCursorLock)
+            {
+                if (pendingRemoteCursors.Count == 0)
+                    return;
+
+                snapshot = new Dictionary<string, CursorPayload>(pendingRemoteCursors, StringComparer.OrdinalIgnoreCase);
+                pendingRemoteCursors.Clear();
+            }
+
+            foreach (var item in snapshot.Values)
+            {
+                canvasManager.UpdateRemoteCursor(item.Username, new Point(item.X, item.Y));
+                cursorLayer?.UpdateCursor(item);
+            }
         }
 
         private void NetworkEvents_OnRoomMembersReceived(RoomMembersPayload payload)
@@ -1716,6 +2101,11 @@ namespace DrawingClient.Forms
                 return;
             UIInvoke(() =>
             {
+                lock (remoteCursorLock)
+                {
+                    pendingRemoteCursors.Remove(payload.Username);
+                    remoteCursorTimestamps.Remove(payload.Username);
+                }
                 cursorLayer?.RemoveCursor(payload.Username);
                 canvasManager.RemoveRemoteCursor(payload.Username);
                 ToastForm.ShowToast(this, $"{payload.Username} đã rời phòng");
@@ -1732,8 +2122,33 @@ namespace DrawingClient.Forms
         {
             if (payload?.Actions == null)
                 return;
+            if (payload.IsChunked)
+            {
+                UIInvoke(() =>
+                {
+                    if (payload.ChunkIndex == 0 || !isReceivingSyncChunks)
+                    {
+                        actionHistory.Clear();
+                        undoneActionIds.Clear();
+                        ownRedoActionIds.Clear();
+                        isReceivingSyncChunks = true;
+                    }
+
+                    actionHistory.AddRange(payload.Actions);
+                    AppendLog($"Dang dong bo bang ve: chunk {payload.ChunkIndex + 1}/{Math.Max(1, payload.TotalChunks)}");
+
+                    if (!payload.IsFinalChunk)
+                        return;
+
+                    isReceivingSyncChunks = false;
+                    RenderVisibleHistory();
+                    AppendLog($"Dong bo {actionHistory.Count} hanh dong tu phong");
+                });
+                return;
+            }
             if (payload.Actions.Count >= 0)
             {
+                isReceivingSyncChunks = false;
                 actionHistory.Clear();
                 actionHistory.AddRange(payload.Actions);
                 undoneActionIds.Clear();
@@ -1884,22 +2299,6 @@ namespace DrawingClient.Forms
         private void NetworkEvents_OnUndoReceived(UndoPayload payload) => UIInvoke(() => ApplyUndoFromNetwork(payload));
         private void NetworkEvents_OnRedoReceived(RedoPayload payload) => UIInvoke(() => ApplyRedoFromNetwork(payload));
 
-        private void NetworkEvents_OnLaserReceived(LaserPayload payload)
-        {
-            if (payload == null || string.IsNullOrWhiteSpace(payload.Username))
-                return;
-            if (IsCurrentUser(payload.Username))
-                return;
-
-            UIInvoke(() =>
-            {
-                if (payload.IsActive)
-                    canvasManager.UpdateRemoteLaser(payload.Username, new Point(payload.X, payload.Y));
-                else
-                    canvasManager.RemoveRemoteLaser(payload.Username);
-            });
-        }
-
         private void NetworkEvents_OnReactionReceived(ReactionPayload payload)
         {
             if (payload == null)
@@ -1991,21 +2390,6 @@ namespace DrawingClient.Forms
             });
         }
 
-        private void NetworkEvents_OnFollowModeReceived(FollowModePayload payload)
-        {
-            if (payload == null)
-                return;
-            UIInvoke(() =>
-            {
-                if (payload.IsFollowing && payload.TargetUsername == _network.CurrentUsername)
-                {
-                    canvasManager.ZoomFactor = payload.ZoomFactor <= 0 ? canvasManager.ZoomFactor : payload.ZoomFactor;
-                    canvas.Invalidate();
-                }
-                AppendLog($"Follow: {payload.FollowerUsername} -> {payload.TargetUsername} ({payload.IsFollowing})");
-            });
-        }
-
         private void NetworkEvents_OnTurnBasedReceived(TurnBasedPayload payload)
         {
             if (payload == null)
@@ -2020,7 +2404,7 @@ namespace DrawingClient.Forms
                 string.Equals(payload.ActiveUser, _network.CurrentUsername, StringComparison.OrdinalIgnoreCase);
 
             canvasManager.IsDrawingEnabled = isMyTurn;
-            turnPanel.SetState(payload.IsEnabled, payload.ActiveUser, _isRoomOwner);
+            turnPanel.SetState(payload.IsEnabled, payload.ActiveUser, CanAdvanceCurrentTurn(payload.IsEnabled, payload.ActiveUser));
             AppendLog(payload.IsEnabled
                 ? $"Vẽ theo lượt: bật, lượt của {payload.ActiveUser}"
                 : "Vẽ theo lượt: tắt");
@@ -2031,9 +2415,9 @@ namespace DrawingClient.Forms
 
         private void HandleNextTurnRequested()
         {
-            if (!_isRoomOwner)
+            if (!CanAdvanceCurrentTurn(turnPanel.IsEnabled, turnPanel.ActiveUser))
             {
-                ToastForm.ShowToast(this, "Chỉ chủ phòng mới được chuyển lượt");
+                ToastForm.ShowToast(this, "Chỉ người đang giữ lượt mới được chuyển lượt");
                 return;
             }
 
@@ -2053,6 +2437,12 @@ namespace DrawingClient.Forms
 
             _network?.Send(CommandType.TURN_CHANGE, payload);
             _udpManager?.SendTurnChange(payload);
+        }
+
+        private bool CanAdvanceCurrentTurn(bool enabled, string activeUser)
+        {
+            return enabled &&
+                string.Equals(activeUser, _network?.CurrentUsername, StringComparison.OrdinalIgnoreCase);
         }
 
         private void NetworkEvents_OnSaveGalleryResponse(SaveGalleryResponse payload)
@@ -2106,12 +2496,6 @@ namespace DrawingClient.Forms
         {
             if (!e.Shift)
                 canvas.Cursor = Cursors.Default;
-
-            if (e.KeyCode == Keys.Menu)
-            {
-                var pos = canvasManager?.ScreenToCanvas(canvas.PointToClient(Cursor.Position)) ?? canvas.PointToClient(Cursor.Position);
-                SendLaserRealtime(new LaserPayload { Username = _network?.CurrentUsername, X = pos.X, Y = pos.Y, IsActive = false });
-            }
         }
 
         private void Canvas_MouseWheel(object sender, MouseEventArgs e)

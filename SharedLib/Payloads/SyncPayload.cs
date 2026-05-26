@@ -33,6 +33,11 @@ namespace SharedLib.Payloads
     {
         public string RoomCode { get; set; }
         public List<DrawAction> Actions { get; set; } = new List<DrawAction>();
+        public List<string> RawActions { get; set; } = new List<string>();
+        public bool IsChunked { get; set; }
+        public int ChunkIndex { get; set; }
+        public int TotalChunks { get; set; }
+        public bool IsFinalChunk { get; set; }
     }
 
     public class UndoPayload
@@ -70,25 +75,5 @@ namespace SharedLib.Payloads
         public string RoomCode { get; set; }
         public long TargetTimestamp { get; set; }
         public List<DrawAction> Actions { get; set; } = new List<DrawAction>();
-    }
-
-    // Tuần 6 — Snapshot
-    public class SnapshotListPayload
-    {
-        public string RoomCode { get; set; }
-        public List<SnapshotInfo> Snapshots { get; set; } = new List<SnapshotInfo>();
-    }
-
-    public class SnapshotInfo
-    {
-        public int SnapshotID { get; set; }
-        public long Timestamp { get; set; }
-        public string ThumbnailBase64 { get; set; }
-    }
-
-    public class SnapshotRestorePayload
-    {
-        public string RoomCode { get; set; }
-        public int SnapshotID { get; set; }
     }
 }

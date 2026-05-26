@@ -23,6 +23,7 @@ namespace LoadBalancer
             EnvLoader.Load();
 
             int listenPort = EnvLoader.GetInt("LOAD_BALANCER_PORT", 9000);
+            int udpPort = EnvLoader.GetInt("LOAD_BALANCER_UDP_PORT", 9001);
             string strategy = EnvLoader.Get("LOAD_BALANCER_STRATEGY", "room-affinity");
             var lb = new DrawingLoadBalancer();
             lb.RoutingStrategy = string.IsNullOrWhiteSpace(strategy) ? "room-affinity" : strategy.Trim();
@@ -36,7 +37,7 @@ namespace LoadBalancer
 
             Console.WriteLine($"[LB] Routing strategy: {lb.RoutingStrategy}");
             Console.WriteLine("[LB] Ctrl+C to stop.");
-            await lb.StartAsync(listenPort);
+            await lb.StartAsync(listenPort, udpPort);
         }
 
         private static int TryLoadServersFromJson(DrawingLoadBalancer lb)

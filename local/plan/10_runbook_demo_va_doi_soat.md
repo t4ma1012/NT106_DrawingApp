@@ -40,15 +40,15 @@ Log LB: ...
 
 ## Runbook demo tong
 
-Runbook day du cho cac kich ban demo nam o [local/setup/setup.md](../setup/setup.md).
+Runbook day du cho cac kich ban demo nam o [setup/README.md](../../setup/README.md), checklist nghiem thu o [setup/CHECKLIST.md](../../setup/CHECKLIST.md).
 
 ### Chuan bi
 
-- `.env` tren moi may.
-- Neon connection string dung.
-- `server.pfx` co san cho DrawingServer.
+- Goi `NT106-DrawingApp-setup.zip` tren moi may, trong do co `setup/apps/.../*.exe`.
+- `setup\.env` da co Neon connection string va server certificate settings dung.
+- `server.pfx` co san trong `setup\apps\DrawingServer`.
 - Port Windows Firewall mo cho backend.
-- Ngrok TCP tunnel san sang.
+- Ngrok TCP tunnel vao LoadBalancer san sang neu demo internet; khong dung UDP public qua Internet.
 
 ### Cau hinh client public
 
@@ -58,6 +58,7 @@ LOAD_BALANCER_CLIENT_MODE=relay
 LOAD_BALANCER_STRATEGY=room-affinity
 LOAD_BALANCER_HOST=<ngrok-host>
 LOAD_BALANCER_PORT=<ngrok-port>
+LOAD_BALANCER_UDP_PROXY=0
 ```
 
 ### Cau hinh LB
@@ -65,7 +66,6 @@ LOAD_BALANCER_PORT=<ngrok-port>
 ```env
 LOAD_BALANCER_PORT=9000
 LOAD_BALANCER_STRATEGY=room-affinity
-DATABASE_URL=<neon>
 LB_SERVER_1_HOST=<lan-or-tailscale-host-server-1>
 LB_SERVER_1_TCP_PORT=8888
 LB_SERVER_2_HOST=<lan-or-tailscale-host-server-2>
@@ -80,7 +80,6 @@ Server 1:
 SERVER_ID=server-1
 SERVER_TCP_PORT=8888
 SERVER_UDP_PORT=8889
-DATABASE_URL=<neon>
 ```
 
 Server 2:
@@ -89,7 +88,6 @@ Server 2:
 SERVER_ID=server-2
 SERVER_TCP_PORT=8890
 SERVER_UDP_PORT=8891
-DATABASE_URL=<neon>
 ```
 
 ### Thu tu test

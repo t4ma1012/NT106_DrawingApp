@@ -19,6 +19,7 @@ namespace DrawingServer.Network
         public string RoomCode { get; set; } = "";
         public string AssignedColor { get; set; } = "#000000";
         public SslStream? SecureStream { get; set; }
+        public volatile bool IsDisconnected;
 
         // ✅ Lock để đảm bảo chỉ 1 task ghi vào stream tại một thời điểm
         // Tránh race condition khi broadcast nhiều lệnh cùng lúc
