@@ -187,8 +187,8 @@ namespace LoadBalancer
             int read = 0;
             try
             {
-                // XU LY BAT DONG BO: doc preface ROUTE/RELAY tu client ma khong khoa LB.
-                // Sau khi doc xong, LB moi quyet dinh day la request ROUTE hay phien proxy TLS.
+                // LUONG STREAM 1 (ROUTE): day la luong dieu huong nhe, LB doc preface dau tien de biet client dang hoi route.
+                // LUONG STREAM 2 (RELAY): neu preface khong phai ROUTE, LB se chuyen sang ky vong proxy TCP/TLS 2 chieu.
                 read = await clientStream.ReadAsync(probe, 0, probe.Length);
                 if (read <= 0)
                 {
@@ -563,6 +563,8 @@ namespace LoadBalancer
 
         private static async Task SendRouteResponseAsync(NetworkStream stream, ServerInfo server)
         {
+            // LUONG STREAM 1 (ROUTE): response la JSON mot dong ket thuc bang newline de client co the ReadLineAsync.
+            // Stream nay chi dung cho dieu huong ban dau, khong phai stream noi dung ung dung.
             string json = JsonConvert.SerializeObject(new
             {
                 host = server.Host,
@@ -578,6 +580,7 @@ namespace LoadBalancer
 
         private static async Task SendRouteErrorAsync(NetworkStream stream, string error)
         {
+            // LUONG STREAM 1 (ROUTE): loi dieu huong cung phai tra ve newline-terminated JSON de client doc dong cuoi cung.
             string json = JsonConvert.SerializeObject(new { error });
             byte[] bytes = Encoding.UTF8.GetBytes(json + "\n");
             await stream.WriteAsync(bytes, 0, bytes.Length);
@@ -592,7 +595,7 @@ namespace LoadBalancer
                 int read;
                 try
                 {
-                    // XU LY BAT DONG BO: doc stream theo chunk, task se nhuong thread khi chua co du lieu.
+                    // LUONG STREAM 2 (RELAY): doc tung chunk cua NetworkStream; day la proxy binary thuan stream, khong co packet boundary san.
                     read = await from.ReadAsync(buf, 0, buf.Length);
                 }
                 catch
@@ -605,7 +608,7 @@ namespace LoadBalancer
 
                 try
                 {
-                    // XU LY BAT DONG BO: ghi chunk sang dau con lai cua proxy ma khong khoa LB.
+                    // LUONG STREAM 2 (RELAY): ghi ngay chunk sang dau con lai de giu duong truyen 2 chieu thong suot.
                     await to.WriteAsync(buf, 0, read);
                     await to.FlushAsync();
                 }

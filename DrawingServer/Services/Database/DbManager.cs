@@ -82,18 +82,21 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
                 string hashedPass = ComputeSha256Hash(password);
 
                 // Kiểm tra user tồn tại chưa
+                // AUTH FLOW - BUOC 6B.1: truy van password_hash theo username trong bang Users.
                 using var cmd = new NpgsqlCommand("SELECT password_hash FROM Users WHERE username = @u", conn);
                 cmd.Parameters.AddWithValue("u", username);
                 var dbPass = await cmd.ExecuteScalarAsync() as string;
 
                 if (dbPass != null)
                 {
+                    // AUTH FLOW - BUOC 6B.2: user da ton tai, so sanh password nguoi dung gui voi hash trong DB.
                     if (dbPass == hashedPass || dbPass == password) return (true, "Đăng nhập thành công!");
                     return (false, "Sai mật khẩu!");
                 }
                 else
                 {
                     // Nếu chưa có thì tạo mới (Auto-Register)
+                    // AUTH FLOW - BUOC 6A.2: user chua ton tai, tao ban ghi Users moi voi password da hash.
                     using var cmdInsert = new NpgsqlCommand("INSERT INTO Users (username, password_hash) VALUES (@u, @p)", conn);
                     cmdInsert.Parameters.AddWithValue("u", username);
                     cmdInsert.Parameters.AddWithValue("p", hashedPass);
@@ -531,7 +534,8 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
                 cmdInsert.Parameters.AddWithValue("u", username);
                 cmdInsert.Parameters.AddWithValue("m", message);
 
-                // KET NOI DU LIEU/BAT DONG BO: luu chat vao ChatHistory bang lenh async.
+                // LUU CHAT HISTORY TREN MAY SERVER: thong diep duoc ghi vao bang ChatHistory trong PostgreSQL,
+                // de client moi vao phong co the tai lai lich su chat tu cung mot noi luu tru.
                 await cmdInsert.ExecuteNonQueryAsync();
                 return true;
             }

@@ -75,8 +75,8 @@ namespace DrawingServer.Network
                 while (true)
                 {
                     byte[] lenBuf = new byte[4];
-                    // XU LY BAT DONG BO: doc stream TLS theo length-prefix bang ReadAsync.
-                    // Server doc dung 4 byte length truoc, sau do moi doc packet body de tranh cat/ghep packet TCP sai.
+                    // LUONG STREAM: dung length-prefix 4 byte de phan biet ranh gioi packet tren TCP stream.
+                    // TCP la stream lien tuc, nen server phai doc dung do dai truoc khi doc body packet.
                     if (!await ReadExactAsync(sslStream, lenBuf, 4)) break;
 
                     if (BitConverter.IsLittleEndian) Array.Reverse(lenBuf);
@@ -95,33 +95,43 @@ namespace DrawingServer.Network
                             break;
 
                         case CommandType.LOGIN:
+                            // AUTH FLOW - BUOC 5B (SERVER): nhan LOGIN packet, parse LoginPayload tu JSON payload.
                             var loginData = PacketHelper.GetPayload<LoginPayload>(packet);
                             if (loginData != null)
                             {
+                                // AUTH FLOW - BUOC 6B: kiem tra username/password trong PostgreSQL qua DbManager.LoginAsync.
                                 var dbResult = await DbManager.LoginAsync(loginData.Username, loginData.Password);
+                                // AUTH FLOW - BUOC 7B: tra LOGIN_RESPONSE ve dung client dang gui request.
                                 await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.LOGIN_RESPONSE,
                                     new LoginResponse { IsSuccess = dbResult.IsSuccess, Message = dbResult.Message }));
+                                // AUTH FLOW - BUOC 8B: neu hop le, gan username vao ClientSession de cac lenh room/chat/draw biet chu so huu.
                                 if (dbResult.IsSuccess) session.Username = loginData.Username;
                             }
                             break;
 
                         case CommandType.REGISTER:
+                            // AUTH FLOW - BUOC 5A (SERVER): nhan REGISTER packet, parse RegisterPayload tu JSON payload.
                             var regData = PacketHelper.GetPayload<RegisterPayload>(packet);
                             if (regData != null)
                             {
                                 // Kiểm tra username đã tồn tại chưa
+                                // AUTH FLOW - BUOC 6A: dung LoginAsync de kiem tra user da ton tai chua.
+                                // Neu user ton tai nhung password khac, LoginAsync tra "Sai mat khau" -> xem nhu username da bi dung.
                                 var existCheck = await DbManager.LoginAsync(regData.Username, regData.Password);
                                 bool alreadyExists = existCheck.Message == "Sai mật khẩu!";
 
                                 if (alreadyExists)
                                 {
+                                    // AUTH FLOW - BUOC 7A: username da ton tai, tra REGISTER_RESPONSE that bai.
                                     await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.REGISTER_RESPONSE,
                                         new RegisterResponse { IsSuccess = false, Message = "Tên tài khoản đã tồn tại!" }));
                                 }
                                 else
                                 {
                                     // LoginAsync tự tạo nếu chưa có → reuse
+                                    // AUTH FLOW - BUOC 6A.1: LoginAsync tu tao user neu username chua co trong DB.
                                     var regResult = await DbManager.LoginAsync(regData.Username, regData.Password);
+                                    // AUTH FLOW - BUOC 7A: gui ket qua dang ky ve client.
                                     await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.REGISTER_RESPONSE,
                                         new RegisterResponse { IsSuccess = regResult.IsSuccess, Message = regResult.IsSuccess ? "Đăng ký thành công! Hãy đăng nhập." : regResult.Message }));
                                 }
@@ -770,10 +780,11 @@ namespace DrawingServer.Network
             byte[] lenBytes = BitConverter.GetBytes(data.Length);
             if (BitConverter.IsLittleEndian) Array.Reverse(lenBytes);
 
-            // XU LY DA LUONG: serialize viec ghi SslStream tren tung client de tranh race khi broadcast song song.
+            // LUONG STREAM: khoa ghi tren tung session de nhieu broadcast khong ghi xen ke len cung SslStream.
             await client.WriteLock.WaitAsync();
             try
             {
+                // Ghi length truoc, payload sau de client doc lai dung packet boundary.
                 await client.SecureStream.WriteAsync(lenBytes, 0, 4);
                 await client.SecureStream.WriteAsync(data, 0, data.Length);
                 await client.SecureStream.FlushAsync();
@@ -843,10 +854,11 @@ namespace DrawingServer.Network
             byte[] lenBytes = BitConverter.GetBytes(data.Length);
             if (BitConverter.IsLittleEndian) Array.Reverse(lenBytes);
 
-            // XU LY DA LUONG: static broadcast cung dung WriteLock de khong ghi xen ke packet.
+            // LUONG STREAM: static broadcast cung dung WriteLock de khong ghi xen ke packet tren session nay.
             await client.WriteLock.WaitAsync();
             try
             {
+                // Cu ly nay giu nguyen protocol length-prefix giua server va client.
                 await client.SecureStream.WriteAsync(lenBytes, 0, 4);
                 await client.SecureStream.WriteAsync(data, 0, data.Length);
                 await client.SecureStream.FlushAsync();

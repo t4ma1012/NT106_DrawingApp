@@ -62,6 +62,8 @@ namespace DrawingClient.Network
 
                 if (useSSL)
                 {
+                    // LUONG STREAM: moi TCP socket duoc boc bang SslStream de packet LOGIN/CHAT/DRAW di qua TLS.
+                    // LUONG STREAM: boc NetworkStream bang SslStream de toan bo packet TCP sau do di qua TLS.
                     var ssl = new SslStream(_tcpClient.GetStream(), false, (s, cert, chain, err) => true);
                     AuthenticateSslWithTimeout(ssl, ConnectTimeoutMs);
                     _stream = ssl;
@@ -113,11 +115,15 @@ namespace DrawingClient.Network
                 var rawStream = _tcpClient.GetStream();
                 if (!string.IsNullOrWhiteSpace(serverId))
                 {
+                    // LUONG STREAM: relay preface duoc gui truoc TLS de LoadBalancer biet backend ma client muon den.
+                    // Day la du lieu dieu huong ban dau, khong phai packet business cua ung dung.
                     byte[] preface = Encoding.ASCII.GetBytes($"RELAY server={serverId.Trim()}\n");
                     rawStream.Write(preface, 0, preface.Length);
                     rawStream.Flush();
                 }
 
+                // LUONG STREAM: sau preface, stream duoc nang cap len TLS de bao ve packet TCP.
+                // Tu thoi diem nay tro di, moi lenh auth/room/chat/deu chay tren SslStream.
                 var ssl = new SslStream(rawStream, false, (s, cert, chain, err) => true);
                 AuthenticateSslWithTimeout(ssl, ConnectTimeoutMs);
                 _stream = ssl;
@@ -293,6 +299,7 @@ namespace DrawingClient.Network
                 byte[] data = packet.Serialize();
                 byte[] lenBytes = BitConverter.GetBytes(data.Length);
                 if (BitConverter.IsLittleEndian) Array.Reverse(lenBytes);
+                // LUONG STREAM: ghi length-prefix truoc, sau do ghi payload de ben nhan doc dung packet boundary.
                 // XU LY DA LUONG: khoa stream de nhieu thread khong ghi xen ke lam vo packet.
                 lock (_stream)
                 {
@@ -315,11 +322,17 @@ namespace DrawingClient.Network
 
         public void SendLogin(string username, string password)
         {
+            // AUTH FLOW - BUOC 3B: luu username/password hien tai de sau nay co the reconnect room owner qua LB.
             CurrentUsername = username;
             _lastPassword = password ?? "";
+            // AUTH FLOW - BUOC 4B: tao LOGIN packet va gui qua stream TCP/TLS da ket noi.
             Send(CommandType.LOGIN, new LoginPayload { Username = username, Password = password });
         }
-        public void SendRegister(string username, string password) => Send(CommandType.REGISTER, new RegisterPayload { Username = username, Password = password });
+        public void SendRegister(string username, string password)
+        {
+            // AUTH FLOW - BUOC 4A: tao REGISTER packet tu username/password va gui qua stream TCP/TLS.
+            Send(CommandType.REGISTER, new RegisterPayload { Username = username, Password = password });
+        }
         public void SendCreateRoom(int canvasWidth = 1920, int canvasHeight = 1080) => Send(CommandType.CREATE_ROOM, new CreateRoomPayload { CanvasWidth = canvasWidth, CanvasHeight = canvasHeight });
         public void SendJoinRoom(string roomCode, bool isSpectator = false)
         {
@@ -347,8 +360,9 @@ namespace DrawingClient.Network
 
         private void ReceiveLoop()
         {
-            // XU LY DA LUONG: ReceiveLoop chay tren TCP-Recv thread, doc packet length-prefix lien tuc tu server.
+            // LUONG STREAM: ReceiveLoop doc lien tuc tu SslStream theo kieu length-prefix 4 byte + payload.
             // Khi nhan xong packet, no goi ProcessPacket de phat event sang UI/network layer.
+            // XU LY DA LUONG: thread nay chi doc stream, khong cham vao UI thread.
             byte[] lenBuf = new byte[4];
             while (_running)
             {
@@ -373,6 +387,7 @@ namespace DrawingClient.Network
 
         private void ReadExact(byte[] buffer, int count)
         {
+            // LUONG STREAM: doc dung so byte yeu cau, co the lap nhieu lan neu TCP cap du lieu theo tung doan nho.
             int total = 0;
             while (total < count)
             {

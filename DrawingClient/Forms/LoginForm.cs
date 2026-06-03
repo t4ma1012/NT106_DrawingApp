@@ -75,12 +75,15 @@ namespace DrawingClient.Forms
             };
             btnRegister.Click += async (s, e) =>
             {
+                // AUTH FLOW - BUOC 1A (REGISTER UI): user bam Dang ky, khoa nut de tranh gui trung nhieu request.
                 SetAuthButtonsEnabled(false);
                 try
                 {
+                    // AUTH FLOW - BUOC 2: dam bao da ket noi TCP/TLS toi server/LB truoc khi gui REGISTER.
                     if (!await EnsureConnectedAsync())
                         return;
 
+                    // AUTH FLOW - BUOC 3A: dong goi username/password tren form va gui REGISTER qua ClientNetwork.
                     _network.SendRegister(txtUsername.Text.Trim(), txtPassword.Text);
                 }
                 finally
@@ -127,6 +130,7 @@ namespace DrawingClient.Forms
 
         private async void BtnLogin_Click(object sender, EventArgs e)
         {
+            // AUTH FLOW - BUOC 1B (LOGIN UI): lay du lieu nguoi dung nhap tren form.
             string username = txtUsername.Text?.Trim();
             string password = txtPassword.Text ?? string.Empty;
 
@@ -139,10 +143,12 @@ namespace DrawingClient.Forms
             SetAuthButtonsEnabled(false);
             try
             {
+                // AUTH FLOW - BUOC 2: tao ket noi TCP/TLS neu client chua ket noi server.
                 if (!await EnsureConnectedAsync())
                     return;
 
                 lblStatus.Text = "Đang gửi thông tin xác thực...";
+                // AUTH FLOW - BUOC 3B: gui LOGIN packet gom username/password sang server.
                 _network.SendLogin(username, password);
             }
             finally
@@ -241,12 +247,14 @@ namespace DrawingClient.Forms
         {
             if (this.IsHandleCreated && this.InvokeRequired)
             {
+                // AUTH FLOW - BUOC 7: LOGIN_RESPONSE den tu network thread nen marshal ve UI thread truoc khi mo Lobby.
                 this.BeginInvoke(new Action(() => NetworkEvents_OnLoginResponse(response)));
                 return;
             }
 
             if (response != null && response.IsSuccess)
             {
+                // AUTH FLOW - BUOC 8: dang nhap thanh cong, bo subscribe auth event va chuyen sang LobbyForm.
                 lblStatus.Text = "Đăng nhập thành công.";
                 NetworkEvents.OnLoginResponse -= NetworkEvents_OnLoginResponse;
                 NetworkEvents.OnRegisterResponse -= NetworkEvents_OnRegisterResponse;
@@ -266,10 +274,12 @@ namespace DrawingClient.Forms
         {
             if (this.IsHandleCreated && this.InvokeRequired)
             {
+                // AUTH FLOW - BUOC 7A: REGISTER_RESPONSE den tu network thread, cap nhat label phai ve UI thread.
                 this.BeginInvoke(new Action(() => NetworkEvents_OnRegisterResponse(response)));
                 return;
             }
 
+            // AUTH FLOW - BUOC 8A: dang ky chi hien ket qua; user dang nhap lai bang nut Dang nhap.
             lblStatus.Text = response?.Message ?? "Đăng ký xong.";
         }
 

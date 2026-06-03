@@ -98,6 +98,104 @@ NT106_DrawingApp/
 - Internet ngrok: public TCP vao LB hoac server direct.
 - Tailscale dung cho duong LoadBalancer -> server khi server khac mang.
 
+### Luong dang nhap / dang ky
+
+Luong xac thuc duoc tach thanh 4 lop ro rang de UI khong bi block va server co the xu ly dong bo:
+
+1. `DrawingClient/Forms/LoginForm.cs`
+	- Ham `BtnLogin_Click()` xu ly nut `Đăng nhập`, con event `btnRegister.Click` xu ly nut `Đăng ký`.
+	- `EnsureConnectedAsync()` dam bao client da ket noi TCP/TLS toi server hoac LoadBalancer truoc khi gui auth.
+	- `NetworkEvents_OnLoginResponse()` nhan `LOGIN_RESPONSE` va chuyen sang `LobbyForm` khi login thanh cong.
+
+2. `DrawingClient/Network/ClientNetwork.cs`
+	- `SendLogin()` va `SendRegister()` luu `CurrentUsername` va `_lastPassword` de phuc vu reconnect/route ve sau.
+	- Hai ham nay dong goi du lieu thanh `LOGIN` / `REGISTER` packet roi gui qua `SslStream`.
+	- `ReconnectToRoomOwnerViaLoadBalancerAsync()` dung lai thong tin auth da luu de login lai sau khi route sang owner server.
+
+3. `DrawingServer/Network/SecureTcpServer.cs`
+	- `HandleClientAsync()` nhan `LOGIN` hoac `REGISTER` packet trong vong lap doc stream TLS.
+	- Packet duoc parse sang payload, sau do goi `DbManager.LoginAsync()` de kiem tra thong tin trong PostgreSQL.
+	- Server tra ve `LOGIN_RESPONSE` hoac `REGISTER_RESPONSE` bang `SendPacketToClientAsync()`.
+	- Khi dang nhap thanh cong, `session.Username` duoc gan de cac lenh room/chat/draw sau do biet user hien tai.
+
+4. `DrawingServer/Services/Database/DbManager.cs`
+	- `LoginAsync()` query `Users.password_hash` theo `username`.
+	- `ComputeSha256Hash()` bam mat khau SHA-256 truoc khi so sanh voi gia tri trong DB.
+	- Neu user da ton tai thi so sanh hash de xac thuc.
+	- Neu user chua ton tai, he thong auto-register bang cach tao ban ghi moi trong `Users`.
+
+Tom lai:
+
+`LoginForm` -> `ClientNetwork.SendLogin/SendRegister` -> `SecureTcpServer` -> `DbManager.LoginAsync` -> `LOGIN_RESPONSE` / `REGISTER_RESPONSE` -> `LobbyForm` neu login thanh cong.
+
+### Luong nhap / xuat du lieu
+
+Mot so luong nhap/xuat quan trong trong ung dung:
+
+1. Nhap tai khoan / mat khau
+	- Nguoi dung nhap tren `DrawingClient/Forms/LoginForm.cs`.
+	- Client gui `LOGIN` hoac `REGISTER` packet qua `DrawingClient/Network/ClientNetwork.cs`.
+	- Server tra ve `LOGIN_RESPONSE` / `REGISTER_RESPONSE` trong `DrawingServer/Network/SecureTcpServer.cs`.
+
+2. Nhap prompt AI, xuat ket qua anh
+	- Nguoi dung nhap mo ta anh trong `DrawingClient/AI/StabilityAiClient.cs`.
+	- `GenerateImageAsync()` gui prompt len AI service va nhan ve du lieu anh.
+	- Ket qua tra ve duoc chen vao canvas qua `DrawingClient/Forms/MainForm.cs` va co the luu vao gallery.
+
+3. Nhap du lieu ve canvas, xuat len cac client khac
+	- Nguoi dung ve line, rectangle, circle, text, sticker, flood fill hoac import anh trong `DrawingClient/Drawing/CanvasManager.cs`.
+	- `ClientNetwork.Send(...)` dong goi action thanh packet va gui len server.
+	- `SecureTcpServer.BroadcastToRoomAsync()` broadcast lai cho cac thanh vien trong room de dong bo realtime.
+
+4. Nhap chat, xuat lich su chat
+	- Nguoi dung goi tin nhan trong `DrawingClient/Forms/MainForm.cs`.
+	- Server luu vao `ChatHistory` tren may server qua `DrawingServer/Services/Database/DbManager.cs` va gui broadcast cho client dang online.
+	- Comment trong `DbManager.SaveChatMessageAsync()` ghi ro day la luu chat history vao PostgreSQL tren may server, khong phai local client.
+	- Client moi vao phong se nhan lai mot phan lich su gan nhat trong `SecureTcpServer.HandleClientAsync()`.
+
+5. Nhap / xuat gallery
+	- Nguoi dung save canvas thanh anh gallery trong `DrawingClient/Forms/MainForm.cs`.
+	- Server luu metadata va anh vao DB qua `DrawingServer/Services/Database/DbManager.cs`.
+	- Client co the xem thumbnail, tai lai, hoac xuat anh local khong watermark tu `DrawingClient/Forms/GalleryForm.cs`.
+
+6. Nhap tao / join phong, xuat trang thai phong
+	- Nguoi dung tao phong trong `DrawingClient/Forms/LobbyForm.cs`.
+	- `ClientNetwork` gui `CREATE_ROOM` va `JOIN_ROOM` packet len `DrawingServer/Network/SecureTcpServer.cs`.
+	- Server tra ve `CREATE_ROOM_RESPONSE` / `JOIN_ROOM_RESPONSE` va cap nhat danh sach thanh vien phong.
+
+7. Nhap du lieu local, xuat file / du lieu luu tru
+	- Nguoi dung co the luu canvas, gallery, hoac xuat anh local tu `DrawingClient/Forms/MainForm.cs` va `DrawingClient/Forms/GalleryForm.cs`.
+	- `DrawingServer/Services/Database/DbManager.cs` luu du lieu xuong PostgreSQL.
+	- `DrawingClient/Network/ClientNetwork.cs` va `DrawingServer/Network/SecureTcpServer.cs` dong bo lai trang thai sau khi tai lai phong hoac reconnect.
+
+### Luong stream / TCP-TLS
+
+Mot so file xu ly stream can chu y:
+
+| File | Luong stream chinh |
+| --- | --- |
+| `DrawingClient/Network/ClientNetwork.cs` | Tao `TcpClient`, boc `SslStream`, gui `RELAY` preface cho LB, bat handshake TLS va doc thread TCP rieng. |
+| `DrawingClient/Network/SecureTcpClient.cs` | Send/receive packet qua `SslStream`, dung length-prefix 4 byte de cat dung packet TCP. |
+| `DrawingServer/Network/SecureTcpServer.cs` | Xac thuc TLS server, doc packet theo length-prefix, broadcast lai qua `SslStream` va khoa `WriteLock`. |
+| `LoadBalancer/LoadBalancer.cs` | Doc/ghi `NetworkStream` theo chunk, forward 2 chieu giua client va backend, tra route response bang newline-terminated JSON. |
+| `DrawingServer/Network/ClientSession.cs` | Giua mot `SslStream` va `SemaphoreSlim WriteLock` de tranh nhieu broadcast ghi xen ke. |
+
+Muc dich cua cac stream comment trong code la de nguoi doc nhin vao file la hieu ngay: ket noi nao di qua TLS, packet nao dung length-prefix, va cho nao can lock khi ghi stream.
+
+Con luong stream client chinh trong `DrawingClient/Network/ClientNetwork.cs` di theo thu tu: mo `TcpClient` -> boc `SslStream` -> gui `RELAY` preface neu co LoadBalancer -> gui packet length-prefix -> doc packet tu `ReceiveLoop()` -> marshal event ve UI. Phan `Send()` va `ReadExact()` la hai diem can chu y nhat khi debug loi cat/ghep packet TCP.
+
+Hai luong stream cu the trong `LoadBalancer/LoadBalancer.cs`:
+
+1. Luong `ROUTE`
+	- Client mo `NetworkStream` va gui dong preface `ROUTE ...` de hoi LB can route ve server nao.
+	- LB doc preface, co the query `owner_server_id`, roi tra ve mot dong JSON ket thuc bang newline.
+	- Stream nay chi dung de dieu huong ban dau, khong mang du lieu ve canvas/chat/draw.
+
+2. Luong `RELAY`
+	- Neu client khong o che do route, LB se dung `NetworkStream` lam proxy binary 2 chieu giua client va DrawingServer.
+	- `ForwardAsync()` doc/ghi tung chunk giua hai dau stream de giu duong truyen lien tuc.
+	- Stream nay dung cho toan bo packet ung dung sau TLS handshake, gom login, room, chat, draw, gallery va AI.
+
 ## 4. Cac file va ham quan trong
 
 ### Client

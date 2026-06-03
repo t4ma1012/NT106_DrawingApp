@@ -38,6 +38,7 @@ namespace DrawingClient.Network
                 _tcpClient = new TcpClient();
                 await _tcpClient.ConnectAsync(serverIp, port);
 
+                // LUONG STREAM: bo TcpClient stream thanh SslStream de moi packet TCP di trong lop TLS.
                 _sslStream = new SslStream(
                     _tcpClient.GetStream(),
                     false,
@@ -45,6 +46,7 @@ namespace DrawingClient.Network
                     null
                 );
 
+                // TLS handshake xong thi moi bat dau send/receive packet length-prefix.
                 await _sslStream.AuthenticateAsClientAsync(serverName, null,
                     SslProtocols.Tls12, false);
 
@@ -64,7 +66,7 @@ namespace DrawingClient.Network
                 throw new InvalidOperationException("Chưa kết nối SSL.");
 
             byte[] data = packet.Serialize();
-            // Gửi độ dài trước (4 bytes big-endian), sau đó payload
+            // LUONG STREAM: gui do dai truoc (4 bytes big-endian), sau do payload de ben nhan cat dung packet.
             byte[] lenBytes = BitConverter.GetBytes(data.Length);
             if (BitConverter.IsLittleEndian) Array.Reverse(lenBytes);
             await _sslStream.WriteAsync(lenBytes, 0, 4);
@@ -78,13 +80,13 @@ namespace DrawingClient.Network
             if (_sslStream == null)
                 throw new InvalidOperationException("Chưa kết nối SSL.");
 
-            // Đọc 4 bytes độ dài
+            // LUONG STREAM: doc 4 byte do dai truoc, roi moi doc body packet.
             byte[] lenBuf = new byte[4];
             await ReadExactAsync(_sslStream, lenBuf, 4);
             if (BitConverter.IsLittleEndian) Array.Reverse(lenBuf);
             int packetLen = BitConverter.ToInt32(lenBuf, 0);
 
-            // Đọc đúng số bytes
+            // Doc dung so byte da thong bao trong header de khong bi cat/ghep packet TCP.
             byte[] packetBuf = new byte[packetLen];
             await ReadExactAsync(_sslStream, packetBuf, packetLen);
             return Packet.Deserialize(packetBuf);
