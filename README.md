@@ -114,19 +114,19 @@ Luong xac thuc duoc tach thanh 4 lop ro rang de UI khong bi block va server co t
 
 3. `DrawingServer/Network/SecureTcpServer.cs`
 	- `HandleClientAsync()` nhan `LOGIN` hoac `REGISTER` packet trong vong lap doc stream TLS.
-	- Packet duoc parse sang payload, sau do goi `DbManager.LoginAsync()` de kiem tra thong tin trong PostgreSQL.
+	- Packet duoc parse sang payload; `LOGIN` goi `DbManager.LoginAsync()`, con `REGISTER` goi `DbManager.RegisterAsync()`.
 	- Server tra ve `LOGIN_RESPONSE` hoac `REGISTER_RESPONSE` bang `SendPacketToClientAsync()`.
 	- Khi dang nhap thanh cong, `session.Username` duoc gan de cac lenh room/chat/draw sau do biet user hien tai.
 
 4. `DrawingServer/Services/Database/DbManager.cs`
 	- `LoginAsync()` query `Users.password_hash` theo `username`.
 	- `ComputeSha256Hash()` bam mat khau SHA-256 truoc khi so sanh voi gia tri trong DB.
-	- Neu user da ton tai thi so sanh hash de xac thuc.
-	- Neu user chua ton tai, he thong auto-register bang cach tao ban ghi moi trong `Users`.
+	- `LoginAsync()` chi xac thuc user da ton tai; neu user khong ton tai thi tra loi that bai.
+	- `RegisterAsync()` moi tao ban ghi moi trong `Users`, password duoc luu duoi dang hash.
 
 Tom lai:
 
-`LoginForm` -> `ClientNetwork.SendLogin/SendRegister` -> `SecureTcpServer` -> `DbManager.LoginAsync` -> `LOGIN_RESPONSE` / `REGISTER_RESPONSE` -> `LobbyForm` neu login thanh cong.
+`LoginForm` -> `ClientNetwork.SendLogin/SendRegister` -> `SecureTcpServer` -> `DbManager.LoginAsync/RegisterAsync` -> `LOGIN_RESPONSE` / `REGISTER_RESPONSE` -> `LobbyForm` neu login thanh cong.
 
 ### Luong nhap / xuat du lieu
 

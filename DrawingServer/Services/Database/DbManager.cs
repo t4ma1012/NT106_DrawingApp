@@ -70,44 +70,78 @@ namespace DrawingServer.Database // Đảm bảo đúng Namespace này để cá
             }
         }
 
-        /// <summary>Xử lý Đăng nhập / Đăng ký tự động</summary>
+        /// <summary>Xac thuc dang nhap. Khong tu tao user moi trong luong LOGIN.</summary>
         public static async Task<(bool IsSuccess, string Message)> LoginAsync(string username, string password)
         {
             try
             {
+                if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
+                    return (false, "Ten dang nhap hoac mat khau khong hop le.");
+
                 // KET NOI DU LIEU/BAT DONG BO: LoginAsync mo connection PostgreSQL va truy van Users bang await.
                 using var conn = new NpgsqlConnection(connString);
                 await conn.OpenAsync();
 
                 string hashedPass = ComputeSha256Hash(password);
 
-                // Kiểm tra user tồn tại chưa
                 // AUTH FLOW - BUOC 6B.1: truy van password_hash theo username trong bang Users.
                 using var cmd = new NpgsqlCommand("SELECT password_hash FROM Users WHERE username = @u", conn);
                 cmd.Parameters.AddWithValue("u", username);
                 var dbPass = await cmd.ExecuteScalarAsync() as string;
 
-                if (dbPass != null)
-                {
-                    // AUTH FLOW - BUOC 6B.2: user da ton tai, so sanh password nguoi dung gui voi hash trong DB.
-                    if (dbPass == hashedPass || dbPass == password) return (true, "Đăng nhập thành công!");
-                    return (false, "Sai mật khẩu!");
-                }
-                else
-                {
-                    // Nếu chưa có thì tạo mới (Auto-Register)
-                    // AUTH FLOW - BUOC 6A.2: user chua ton tai, tao ban ghi Users moi voi password da hash.
-                    using var cmdInsert = new NpgsqlCommand("INSERT INTO Users (username, password_hash) VALUES (@u, @p)", conn);
-                    cmdInsert.Parameters.AddWithValue("u", username);
-                    cmdInsert.Parameters.AddWithValue("p", hashedPass);
-                    // KET NOI DU LIEU/BAT DONG BO: user moi duoc insert vao Users bang lenh async.
-                    await cmdInsert.ExecuteNonQueryAsync();
-                    return (true, "Tạo tài khoản thành công!");
-                }
+                // AUTH FLOW - BUOC 6B.1 FAIL: username khong co trong Users thi LOGIN phai that bai.
+                // Khong insert tai day, neu khong client co the dang nhap bang tai khoan bat ky.
+                if (dbPass == null)
+                    return (false, "Tai khoan khong ton tai.");
+
+                // AUTH FLOW - BUOC 6B.2: user da ton tai, so sanh password nguoi dung gui voi hash trong DB.
+                // Chap nhan dbPass == password de tuong thich du lieu legacy neu co ban ghi plaintext/hash tu client cu.
+                if (dbPass == hashedPass || dbPass == password)
+                    return (true, "Dang nhap thanh cong!");
+
+                return (false, "Sai mat khau!");
             }
-            catch (Exception ex) { return (false, "Lỗi kết nối DB: " + ex.Message); }
+            catch (Exception ex) { return (false, "Loi ket noi DB: " + ex.Message); }
         }
 
+        /// <summary>Dang ky user moi. Chi luong REGISTER moi duoc phep tao tai khoan.</summary>
+        public static async Task<(bool IsSuccess, string Message)> RegisterAsync(string username, string password)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
+                    return (false, "Ten dang nhap hoac mat khau khong hop le.");
+
+                using var conn = new NpgsqlConnection(connString);
+                await conn.OpenAsync();
+
+                using (var cmdExists = new NpgsqlCommand("SELECT COUNT(*) FROM Users WHERE username = @u", conn))
+                {
+                    cmdExists.Parameters.AddWithValue("u", username);
+                    int existing = Convert.ToInt32(await cmdExists.ExecuteScalarAsync());
+                    // AUTH FLOW - BUOC 6A.1 FAIL: REGISTER bi tu choi neu username da ton tai.
+                    if (existing > 0)
+                        return (false, "Ten tai khoan da ton tai!");
+                }
+
+                // AUTH FLOW - BUOC 6A.2: chi REGISTER moi bam SHA-256 va insert user moi vao Users.
+                string hashedPass = ComputeSha256Hash(password);
+                using var cmdInsert = new NpgsqlCommand("INSERT INTO Users (username, password_hash) VALUES (@u, @p)", conn);
+                cmdInsert.Parameters.AddWithValue("u", username);
+                cmdInsert.Parameters.AddWithValue("p", hashedPass);
+                await cmdInsert.ExecuteNonQueryAsync();
+
+                return (true, "Dang ky thanh cong! Hay dang nhap.");
+            }
+            catch (PostgresException ex) when (ex.SqlState == "23505")
+            {
+                return (false, "Ten tai khoan da ton tai!");
+            }
+            catch (Exception ex)
+            {
+                return (false, "Loi ket noi DB: " + ex.Message);
+            }
+        }
         /// <summary>Tạo phòng mới và trả về mã phòng ngẫu nhiên</summary>
         public static async Task<string> CreateRoomAsync(string username, int width, int height)
         {

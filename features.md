@@ -4,6 +4,7 @@ Trang thai: `ACTIVE`
 
 ## Cap nhat nhanh 2026-05-26
 
+- Cap nhat 2026-06-03: da sua loi dang nhap direct/loopback voi tai khoan bat ky van vao duoc. Server khong con auto-register trong `DbManager.LoginAsync`; `LOGIN` chi xac thuc user da ton tai, con `REGISTER` goi `DbManager.RegisterAsync` de tao user moi va luu password hash.
 - Da sua loi kich ban 1 mat ket noi do `setup/apps/DrawingServer` thieu DLL phu thuoc sau lan package bi lock/copy do dang. Da copy bo sung dependency tu Release output vao `setup/apps/DrawingServer`, smoke `start-local-no-lb.ps1 -ClientCount 0 -StopExisting` pass TLS, va `package-release.ps1` bay gio fail som neu co app dang chay tu `setup/apps`.
 - Da chot giu cross-server sync/listen-notify lam fallback, khong tat. `LoadBalancer` duoc gia co cho route room trong kich ban 5.3: owner da biet nhung health stale se duoc ping lai ngay; room legacy co `owner_server_id` rong se duoc claim owner on dinh theo hash room va update DB; room khong thay trong DB cua LB se log ro de bat loi LB/server khac `DATABASE_URL`.
 - Da sua loi chat khong tu xuong dong khi tin nhan dai: `MainForm` doi vung hien thi Chat tu `ListBox` sang `RichTextBox` read-only co `WordWrap=true`, tu dong scroll den dong cuoi khi co tin nhan moi; logic chat/network giu nguyen.
@@ -12,7 +13,7 @@ Trang thai: `ACTIVE`
 - Da gia co LoadBalancer room-affinity: `ROUTE room=<roomCode>` phai tra dung `owner_server_id`/cache owner; neu khong lookup duoc owner hoac owner unhealthy thi fail closed thay vi route random sang server khac. Client join room qua LB se dung lai neu khong resolve duoc owner, tranh chia cung phong sang 2 backend.
 - `PostgresConnectionString.Normalize` chi tu them `Timeout=15` neu env chua set; khong chen `Max Pool Size` vi Npgsql runtime hien bao `Couldn't set max pool size`. `CrossServerSyncService` serialize publish bang semaphore, va cross-server notify bo qua draw/flood/text/spray tan suat cao de tranh connection storm.
 - Da build lai solution, test pass 20 skip 1, va chay `setup/package-release.ps1` de cap nhat `setup/apps` + `NT106-DrawingApp-setup.zip`.
-- Da fix/smoke kich ban `setup/start-local-no-lb.ps1`: server readiness doi bang TLS handshake that, client duoc ep direct mode (`USE_LOAD_BALANCER_ROUTING=0`, `LOAD_BALANCER_CLIENT_MODE=direct`, `SERVER_PUBLIC_HOST=127.0.0.1`) de tranh mo nham LB relay khi demo 1 server. Smoke helper connect SSL + login auto-register pass.
+- Da fix/smoke kich ban `setup/start-local-no-lb.ps1`: server readiness doi bang TLS handshake that, client duoc ep direct mode (`USE_LOAD_BALANCER_ROUTING=0`, `LOAD_BALANCER_CLIENT_MODE=direct`, `SERVER_PUBLIC_HOST=127.0.0.1`) de tranh mo nham LB relay khi demo 1 server. Smoke helper connect SSL + auth smoke pass.
 - Da fix runtime database DigitalOcean: `SharedLib.Config.PostgresConnectionString.Normalize` chuan hoa `postgresql://...?...sslmode=require` sang key-value Npgsql; `DbManager`, `CrossServerSyncService` va `LoadBalancer` khong con loi `Couldn't set postgresql://...sslmode`.
 - User chot khong copy du lieu ung dung tu Neon sang DigitalOcean, chi can schema giong. Da schema-only reset DigitalOcean va apply migration 001-005; doi soat Neon/DO khop 10 bang active va DO de trong row ung dung.
 - `.env` root va `setup\.env` deu tro DigitalOcean; `setup\.env.example` ghi ro chap nhan ca URI DigitalOcean va key-value Npgsql.

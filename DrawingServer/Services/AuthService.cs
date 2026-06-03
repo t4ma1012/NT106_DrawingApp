@@ -39,7 +39,7 @@ namespace DrawingServer.Services
                 if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(passwordHash))
                     return (false, 0, "", "Tên đăng nhập hoặc mật khẩu không hợp lệ");
 
-                // Database performs auto-register if user doesn't exist
+                // Database only validates existing users; registration is handled by RegisterAsync.
                 var (success, message) = await DbManager.LoginAsync(username, passwordHash);
 
                 if (!success)

@@ -102,10 +102,12 @@ namespace DrawingServer.Network
                                 // AUTH FLOW - BUOC 6B: kiem tra username/password trong PostgreSQL qua DbManager.LoginAsync.
                                 var dbResult = await DbManager.LoginAsync(loginData.Username, loginData.Password);
                                 // AUTH FLOW - BUOC 7B: tra LOGIN_RESPONSE ve dung client dang gui request.
+                                // Message duoc truyen thang ve UI de hien ro "sai mat khau" hoac "tai khoan chua ton tai".
                                 await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.LOGIN_RESPONSE,
-                                    new LoginResponse { IsSuccess = dbResult.IsSuccess, Message = dbResult.Message }));
+                                    new LoginResponse { IsSuccess = dbResult.IsSuccess, Message = dbResult.Message, Username = dbResult.IsSuccess ? loginData.Username : "" }));
                                 // AUTH FLOW - BUOC 8B: neu hop le, gan username vao ClientSession de cac lenh room/chat/draw biet chu so huu.
                                 if (dbResult.IsSuccess) session.Username = loginData.Username;
+                                else session.Username = null;
                             }
                             break;
 
@@ -114,31 +116,16 @@ namespace DrawingServer.Network
                             var regData = PacketHelper.GetPayload<RegisterPayload>(packet);
                             if (regData != null)
                             {
-                                // Kiểm tra username đã tồn tại chưa
-                                // AUTH FLOW - BUOC 6A: dung LoginAsync de kiem tra user da ton tai chua.
-                                // Neu user ton tai nhung password khac, LoginAsync tra "Sai mat khau" -> xem nhu username da bi dung.
-                                var existCheck = await DbManager.LoginAsync(regData.Username, regData.Password);
-                                bool alreadyExists = existCheck.Message == "Sai mật khẩu!";
+                                // AUTH FLOW - BUOC 6A: REGISTER moi duoc phep tao user moi trong PostgreSQL.
+                                // LOGIN khong con auto-register nua, tranh nhap tai khoan bat ky cung vao duoc.
+                                var regResult = await DbManager.RegisterAsync(regData.Username, regData.Password);
+                                // AUTH FLOW - BUOC 7A: tra ve ket qua tao user, gom loi trung username neu co.
+                                await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.REGISTER_RESPONSE,
+                                    new RegisterResponse { IsSuccess = regResult.IsSuccess, Message = regResult.Message }));
 
-                                if (alreadyExists)
-                                {
-                                    // AUTH FLOW - BUOC 7A: username da ton tai, tra REGISTER_RESPONSE that bai.
-                                    await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.REGISTER_RESPONSE,
-                                        new RegisterResponse { IsSuccess = false, Message = "Tên tài khoản đã tồn tại!" }));
-                                }
-                                else
-                                {
-                                    // LoginAsync tự tạo nếu chưa có → reuse
-                                    // AUTH FLOW - BUOC 6A.1: LoginAsync tu tao user neu username chua co trong DB.
-                                    var regResult = await DbManager.LoginAsync(regData.Username, regData.Password);
-                                    // AUTH FLOW - BUOC 7A: gui ket qua dang ky ve client.
-                                    await SendPacketToClientAsync(session, PacketHelper.Create(CommandType.REGISTER_RESPONSE,
-                                        new RegisterResponse { IsSuccess = regResult.IsSuccess, Message = regResult.IsSuccess ? "Đăng ký thành công! Hãy đăng nhập." : regResult.Message }));
-                                }
-                                Logger.Info("TCP", $"[REGISTER] '{regData.Username}' → {(alreadyExists ? "đã tồn tại" : "thành công")}");
+                                Logger.Info("TCP", $"[REGISTER] '{regData.Username}' -> {(regResult.IsSuccess ? "success" : "failed")}: {regResult.Message}");
                             }
                             break;
-
                         case CommandType.CREATE_ROOM:
                             var roomData = PacketHelper.GetPayload<CreateRoomPayload>(packet);
                             var createResult = await RoomService.CreateRoomAsync(session.Username ?? "guest", roomData?.CanvasWidth ?? 1920, roomData?.CanvasHeight ?? 1080);

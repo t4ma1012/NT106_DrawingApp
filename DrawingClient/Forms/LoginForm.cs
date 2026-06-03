@@ -76,6 +76,14 @@ namespace DrawingClient.Forms
             btnRegister.Click += async (s, e) =>
             {
                 // AUTH FLOW - BUOC 1A (REGISTER UI): user bam Dang ky, khoa nut de tranh gui trung nhieu request.
+                string username = txtUsername.Text?.Trim();
+                string password = txtPassword.Text ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
+                {
+                    MessageBox.Show("Vui lòng nhập tài khoản và mật khẩu.");
+                    return;
+                }
+
                 SetAuthButtonsEnabled(false);
                 try
                 {
@@ -84,7 +92,9 @@ namespace DrawingClient.Forms
                         return;
 
                     // AUTH FLOW - BUOC 3A: dong goi username/password tren form va gui REGISTER qua ClientNetwork.
-                    _network.SendRegister(txtUsername.Text.Trim(), txtPassword.Text);
+                    lblStatus.ForeColor = Color.DimGray;
+                    lblStatus.Text = "Đang gửi yêu cầu đăng ký...";
+                    _network.SendRegister(username, password);
                 }
                 finally
                 {
@@ -147,6 +157,7 @@ namespace DrawingClient.Forms
                 if (!await EnsureConnectedAsync())
                     return;
 
+                lblStatus.ForeColor = Color.DimGray;
                 lblStatus.Text = "Đang gửi thông tin xác thực...";
                 // AUTH FLOW - BUOC 3B: gui LOGIN packet gom username/password sang server.
                 _network.SendLogin(username, password);
@@ -255,6 +266,8 @@ namespace DrawingClient.Forms
             if (response != null && response.IsSuccess)
             {
                 // AUTH FLOW - BUOC 8: dang nhap thanh cong, bo subscribe auth event va chuyen sang LobbyForm.
+                // Tu day server da gan session.Username, nen cac lenh tao phong/chat/ve sau nay biet user hien tai.
+                lblStatus.ForeColor = Color.SeaGreen;
                 lblStatus.Text = "Đăng nhập thành công.";
                 NetworkEvents.OnLoginResponse -= NetworkEvents_OnLoginResponse;
                 NetworkEvents.OnRegisterResponse -= NetworkEvents_OnRegisterResponse;
@@ -266,7 +279,11 @@ namespace DrawingClient.Forms
             }
             else
             {
-                lblStatus.Text = response?.Message ?? "Đăng nhập thất bại.";
+                // AUTH FLOW - BUOC 8B: hien dung ly do server tra ve, phan biet sai mat khau va tai khoan chua co.
+                string message = BuildLoginFailureMessage(response?.Message);
+                lblStatus.ForeColor = Color.Firebrick;
+                lblStatus.Text = message;
+                MessageBox.Show(message, "Đăng nhập thất bại", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -280,7 +297,50 @@ namespace DrawingClient.Forms
             }
 
             // AUTH FLOW - BUOC 8A: dang ky chi hien ket qua; user dang nhap lai bang nut Dang nhap.
-            lblStatus.Text = response?.Message ?? "Đăng ký xong.";
+            // REGISTER thanh cong moi tao user trong DB; LOGIN voi user chua co se bi tu choi.
+            string message = BuildRegisterMessage(response);
+            lblStatus.ForeColor = response != null && response.IsSuccess ? Color.SeaGreen : Color.Firebrick;
+            lblStatus.Text = message;
+            if (response == null || !response.IsSuccess)
+                MessageBox.Show(message, "Đăng ký thất bại", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
+        private static string BuildLoginFailureMessage(string serverMessage)
+        {
+            string message = serverMessage ?? "";
+            if (message.IndexOf("Sai mat khau", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                message.IndexOf("Sai mật khẩu", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "Sai mật khẩu. Vui lòng kiểm tra lại mật khẩu.";
+
+            if (message.IndexOf("Tai khoan khong ton tai", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                message.IndexOf("Tài khoản không tồn tại", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "Tài khoản chưa tồn tại. Vui lòng đăng ký trước khi đăng nhập.";
+
+            return string.IsNullOrWhiteSpace(message) ? "Đăng nhập thất bại." : message;
+        }
+
+        private static string BuildRegisterMessage(RegisterResponse response)
+        {
+            if (response == null)
+                return "Không nhận được phản hồi đăng ký từ server.";
+
+            if (response.IsSuccess)
+            {
+                string successMessage = response.Message ?? "";
+                if (string.IsNullOrWhiteSpace(successMessage) ||
+                    successMessage.IndexOf("Dang ky thanh cong", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    successMessage.IndexOf("Đăng ký thành công", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return "Đăng ký thành công. Hãy đăng nhập.";
+
+                return successMessage;
+            }
+
+            string failureMessage = response.Message ?? "";
+            if (failureMessage.IndexOf("ton tai", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                failureMessage.IndexOf("tồn tại", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "Tên tài khoản đã tồn tại. Vui lòng chọn tài khoản khác hoặc đăng nhập.";
+
+            return string.IsNullOrWhiteSpace(failureMessage) ? "Đăng ký thất bại." : failureMessage;
         }
 
         private void NetworkEvents_OnDisconnected()
@@ -291,6 +351,7 @@ namespace DrawingClient.Forms
                 return;
             }
 
+            lblStatus.ForeColor = Color.Firebrick;
             lblStatus.Text = "Mất kết nối máy chủ.";
         }
     }

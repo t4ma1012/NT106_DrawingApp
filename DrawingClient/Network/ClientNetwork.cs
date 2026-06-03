@@ -323,6 +323,7 @@ namespace DrawingClient.Network
         public void SendLogin(string username, string password)
         {
             // AUTH FLOW - BUOC 3B: luu username/password hien tai de sau nay co the reconnect room owner qua LB.
+            // Luu y: luu de reconnect, nhung server van la noi quyet dinh login thanh cong hay that bai.
             CurrentUsername = username;
             _lastPassword = password ?? "";
             // AUTH FLOW - BUOC 4B: tao LOGIN packet va gui qua stream TCP/TLS da ket noi.
@@ -331,6 +332,7 @@ namespace DrawingClient.Network
         public void SendRegister(string username, string password)
         {
             // AUTH FLOW - BUOC 4A: tao REGISTER packet tu username/password va gui qua stream TCP/TLS.
+            // REGISTER di chung protocol voi LOGIN, nhung server se goi RegisterAsync rieng de tao user.
             Send(CommandType.REGISTER, new RegisterPayload { Username = username, Password = password });
         }
         public void SendCreateRoom(int canvasWidth = 1920, int canvasHeight = 1080) => Send(CommandType.CREATE_ROOM, new CreateRoomPayload { CanvasWidth = canvasWidth, CanvasHeight = canvasHeight });
@@ -412,9 +414,12 @@ namespace DrawingClient.Network
                         break;
 
                     case CommandType.LOGIN_RESPONSE:
+                        // AUTH FLOW - BUOC 7B: response auth tu server duoc dua ve LoginForm qua event hub.
+                        // Message trong payload duoc giu nguyen de UI phan biet sai mat khau/tai khoan chua co.
                         NetworkEvents.RaiseLoginResponse(PacketHelper.GetPayload<LoginResponse>(p));
                         break;
                     case CommandType.REGISTER_RESPONSE:
+                        // AUTH FLOW - BUOC 7A: response dang ky cho biet tao user thanh cong hay bi trung username.
                         NetworkEvents.RaiseRegisterResponse(PacketHelper.GetPayload<RegisterResponse>(p));
                         break;
                     case CommandType.CREATE_ROOM_RESPONSE:

@@ -174,8 +174,8 @@ Scripts chinh:
    - LB direct route: `LoadBalancerRouteClient.ResolveAsync`, roi connect server duoc route.
    - LB relay: resolve server id, `ClientNetwork.ConnectRelay`.
 3. `ClientNetwork.SendLogin` gui `LOGIN`; `SendRegister` gui `REGISTER`.
-4. `SecureTcpServer.HandleClientAsync` nhan `LOGIN`/`REGISTER`, goi `DbManager.LoginAsync`.
-5. `DbManager.LoginAsync` hash SHA256 password, query `Users`, neu user chua co thi auto-register, neu co thi so password hash.
+4. `SecureTcpServer.HandleClientAsync` nhan `LOGIN`/`REGISTER`; `LOGIN` goi `DbManager.LoginAsync`, `REGISTER` goi `DbManager.RegisterAsync`.
+5. `DbManager.LoginAsync` hash SHA256 password, query `Users` va chi xac thuc user da ton tai; `DbManager.RegisterAsync` tao user moi khi dang ky.
 6. Server tra `LOGIN_RESPONSE`/`REGISTER_RESPONSE`.
 7. `ClientNetwork.ProcessPacket` raise event; `LoginForm.NetworkEvents_OnLoginResponse` mo `LobbyForm`.
 8. Trang thai client sau login nam trong `ClientNetwork.CurrentUsername`, `_lastPassword` dung de reconnect room-owner qua LB.
@@ -238,12 +238,12 @@ Scripts chinh:
 | I/O HTTP API | `DrawingClient/AI/StabilityAiClient.cs`, `DrawingClient/AI/RemoveBgClient.cs` | Goi Hugging Face va remove.bg bang `HttpClient`. |
 | Database | `DrawingServer/Services/Database/DbManager.cs:70`, `:103`, `:185`, `:217`, `:366`, `:506`, `:568`, `:640`, `:733`, `:829`; `LoadBalancer/LoadBalancer.cs:367`, `:394` | Npgsql ket noi PostgreSQL, CRUD users/rooms/history/chat/gallery/AI/action stack/pixel/timeline; LB doc/update owner server room. |
 | Thread/Da luong | `DrawingClient/Network/ClientNetwork.cs:79`, `:82`, `:230`, `:335`; `DrawingServer/Network/SecureTcpServer.cs:45`; `DrawingServer/Network/SecureUdpServer.cs:32`; `LoadBalancer/LoadBalancer.cs:68`, `:78`, `:92`; `StrokePersistenceQueue.cs:22`, `:98`; `MainForm.cs:368` | Client co thread receive va heartbeat; server/LB spawn task moi cho client/UDP packet; queue nen DB; timer flush cursor; lock/semaphore tranh race. |
-| Sign up/Sign in | `DrawingClient/Forms/LoginForm.cs:128`, `:154`, `:236`, `:261`; `DrawingClient/Network/ClientNetwork.cs:303`, `:309`; `DrawingServer/Network/SecureTcpServer.cs:89`, `:100`; `DrawingServer/Services/Database/DbManager.cs:70` | UI login/register, ket noi server, gui packet auth, server validate/hash/auto-register trong DB, tra response va client luu state username/password de reconnect. |
+| Sign up/Sign in | `DrawingClient/Forms/LoginForm.cs:128`, `:154`, `:236`, `:261`; `DrawingClient/Network/ClientNetwork.cs:303`, `:309`; `DrawingServer/Network/SecureTcpServer.cs:89`, `:100`; `DrawingServer/Services/Database/DbManager.cs:70` | UI login/register, ket noi server, gui packet auth, server validate/hash password; `LOGIN` chi xac thuc user da co, `REGISTER` moi tao user trong DB, tra response va client luu state username/password de reconnect. |
 | Luu trang thai dang nhap | `ClientNetwork.CurrentUsername`, `_lastPassword`, `CurrentRoomCode`; `DrawingServer/Network/ClientSession.cs`; `DrawingServer/Services/AuthService.cs` | Client giu username/room/password reconnect; server session giu username, room, UDP endpoint; `AuthService` giu session online/color trong RAM. |
 
 ## 11. Diem chua chac/nen chot them
 
-1. `Register` hien tai tren server dung `DbManager.LoginAsync` co co che auto-register. Nghia la `LOGIN` voi user moi cung co the tao tai khoan. Neu bao cao yeu cau dang ky/dang nhap tach logic nghiem ngat, can chot co can sua flow nay khong.
+1. Dang ky/dang nhap da tach logic: `LOGIN` khong con auto-register, `REGISTER` moi tao user moi trong bang `Users`.
 2. `Pixel art 64x64 tich hop canvas` trong tai lieu dang ghi chua hoan thien UI user-facing; server/DB payload da co nhung server `PIXEL_ART_SYNC` dang tra `GridSize = 32`. Can chot scope neu day la tinh nang bat buoc.
 3. `Che do quan sat` va `follow viewport` con trang thai chua hoan thien/legacy theo `features.md`. Can chot co dua vao bao cao nhu backlog hay can implement tiep.
 4. Mot so file legacy (`Server.cs`, `ClientHandler.cs`, `UdpServer.cs`, `SecureTcpClient.cs`, `SecureUdpSender/Receiver.cs`, `DrawService.cs`) khong phai flow demo chinh. Neu giao vien yeu cau liet ke "tat ca file source" thi co the them phu luc chi tiet hon cho cac file legacy/auto-generated.
